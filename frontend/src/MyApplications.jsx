@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 
+const API_ROOT = import.meta.env.VITE_API_URL || "http://localhost:8080";
+
 export default function MyApplications() {
   const [applications, setApplications] = useState([]);
   const [error, setError] = useState("");
   useEffect(() => {
     const timer = window.setTimeout(async () => {
       try {
-        const response = await fetch("http://localhost:8080/api/entrepreneur/applications", { headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` } });
+        const response = await fetch(`${API_ROOT}/api/entrepreneur/applications`, { headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` } });
         const data = await response.json();
         if (!response.ok) throw new Error("Could not load applications.");
         setApplications(data);

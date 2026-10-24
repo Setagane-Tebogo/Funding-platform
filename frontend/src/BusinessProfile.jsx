@@ -2,7 +2,8 @@
 import { useEffect, useState } from "react";
 import "./BusinessProfile.css";
 
-const API_URL = "http://localhost:8080/api/entrepreneur/business-profile";
+const API_ROOT = import.meta.env.VITE_API_URL || "http://localhost:8080";
+const API_URL = `${API_ROOT}/api/entrepreneur/business-profile`;
 
 const emptyForm = {
   businessName: "",
@@ -148,7 +149,7 @@ function BusinessProfile() {
     setAnalysing(true);
     setError("");
     try {
-      const response = await fetch("http://localhost:8080/api/entrepreneur/business-analysis", {
+      const response = await fetch(`${API_ROOT}/api/entrepreneur/business-analysis`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionStorage.getItem("token")}` },
         body: JSON.stringify({

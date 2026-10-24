@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+const API_ROOT = import.meta.env.VITE_API_URL || "http://localhost:8080";
+
 export default function FindFunding() {
   const [programmes, setProgrammes] = useState([]);
   const [industry, setIndustry] = useState("");
@@ -13,7 +15,7 @@ export default function FindFunding() {
       const path = selectedIndustry
         ? `/industry/${encodeURIComponent(selectedIndustry)}`
         : "/active";
-      const response = await fetch(`http://localhost:8080/api/funder/programmes${path}`);
+      const response = await fetch(`${API_ROOT}/api/funder/programmes${path}`);
       const data = await response.json();
       if (!response.ok) throw new Error("Could not load funding programmes.");
       setProgrammes(data);
@@ -34,7 +36,7 @@ export default function FindFunding() {
     if (!proposal?.trim()) return;
     setMessage("");
     try {
-      const response = await fetch("http://localhost:8080/api/entrepreneur/applications", {
+      const response = await fetch(`${API_ROOT}/api/entrepreneur/applications`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionStorage.getItem("token")}` },
         body: JSON.stringify({ programmeId, proposal }),

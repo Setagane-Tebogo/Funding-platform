@@ -4,6 +4,7 @@ import com.fundingplatform.backend.security.JwtAuthenticationFilter;
 
 import jakarta.servlet.http.HttpServletResponse;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -16,9 +17,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
 import java.util.List;
 
 @Configuration
@@ -26,6 +29,9 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+
+    @Value("${app.frontend-url:http://localhost:5173}")
+    private String frontendUrl;
 
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter) {
@@ -43,76 +49,119 @@ public class SecurityConfig {
             HttpSecurity http) throws Exception {
 
         http
-            .csrf(csrf -> csrf.disable())
-            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .csrf(csrf -> csrf.disable())
 
-            .sessionManagement(session ->
-                    session.sessionCreationPolicy(
-                            SessionCreationPolicy.STATELESS
-                    )
-            )
+                .cors(cors -> cors.configurationSource(
+                        corsConfigurationSource()
+                ))
 
-            .exceptionHandling(exception -> exception
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(
+                                SessionCreationPolicy.STATELESS
+                        )
+                )
 
-                    .authenticationEntryPoint(
-                            (request, response, authException) -> {
-                                response.sendError(
-                                        HttpServletResponse.SC_UNAUTHORIZED,
-                                        "Unauthorized"
-                                );
-                            }
-                    )
+                .exceptionHandling(exception -> exception
 
-                    .accessDeniedHandler(
-                            (request, response, accessDeniedException) -> {
-                                response.sendError(
-                                        HttpServletResponse.SC_FORBIDDEN,
-                                        "Forbidden"
-                                );
-                            }
-                    )
-            )
+                        .authenticationEntryPoint(
+                                (request, response, authException) -> {
+                                    response.sendError(
+                                            HttpServletResponse.SC_UNAUTHORIZED,
+                                            "Unauthorized"
+                                    );
+                                }
+                        )
 
-            .authorizeHttpRequests(auth -> auth
+                        .accessDeniedHandler(
+                                (request, response, accessDeniedException) -> {
+                                    response.sendError(
+                                            HttpServletResponse.SC_FORBIDDEN,
+                                            "Forbidden"
+                                    );
+                                }
+                        )
+                )
 
-                    .requestMatchers("/api/auth/**")
-                    .permitAll()
+                .authorizeHttpRequests(auth -> auth
 
-                    .requestMatchers("/api/funder/programmes/active",
-                            "/api/funder/programmes/industry/**",
-                            "/api/funder/programmes/stage/**")
-                    .permitAll()
+                        // Public authentication endpoints
+                        .requestMatchers("/api/auth/**")
+                        .permitAll()
 
-                    .requestMatchers("/api/entrepreneur/**")
-                    .hasAuthority("ROLE_ENTREPRENEUR")
+                        // Public funding discovery endpoints
+                        .requestMatchers(
+                                "/api/funder/programmes/active",
+                                "/api/funder/programmes/industry/**",
+                                "/api/funder/programmes/stage/**"
+                        )
+                        .permitAll()
 
-                    .requestMatchers("/api/funder/**")
-                    .hasAuthority("ROLE_FUNDER")
+                        // Entrepreneur-only endpoints
+                        .requestMatchers("/api/entrepreneur/**")
+                        .hasAuthority("ROLE_ENTREPRENEUR")
 
-                    .requestMatchers("/api/admin/**")
-                    .hasAuthority("ROLE_ADMIN")
+                        // Funder-only endpoints
+                        .requestMatchers("/api/funder/**")
+                        .hasAuthority("ROLE_FUNDER")
 
-                    .anyRequest()
-                    .authenticated()
-            )
+                        // Administrator-only endpoints
+                        .requestMatchers("/api/admin/**")
+                        .hasAuthority("ROLE_ADMIN")
 
-            .addFilterBefore(
-                    jwtAuthenticationFilter,
-                    UsernamePasswordAuthenticationFilter.class
-            );
+                        // Everything else requires authentication
+                        .anyRequest()
+                        .authenticated()
+                )
+
+                .addFilterBefore(
+                        jwtAuthenticationFilter,
+                        UsernamePasswordAuthenticationFilter.class
+                );
 
         return http.build();
     }
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://localhost:5173", "http://localhost:5174"));
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+
+        CorsConfiguration configuration =
+                new CorsConfiguration();
+
+        configuration.setAllowedOrigins(
+                List.of(
+                        frontendUrl,
+                        "http://localhost:5173",
+                        "http://localhost:5174"
+                )
+        );
+
+        configuration.setAllowedMethods(
+                List.of(
+                        "GET",
+                        "POST",
+                        "PUT",
+                        "DELETE",
+                        "OPTIONS"
+                )
+        );
+
+        configuration.setAllowedHeaders(
+                List.of(
+                        "Authorization",
+                        "Content-Type"
+                )
+        );
+
         configuration.setAllowCredentials(false);
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", configuration);
+
+        UrlBasedCorsConfigurationSource source =
+                new UrlBasedCorsConfigurationSource();
+
+        source.registerCorsConfiguration(
+                "/**",
+                configuration
+        );
+
         return source;
     }
 }

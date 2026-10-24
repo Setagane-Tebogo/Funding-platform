@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 
@@ -90,7 +91,9 @@ public class SecurityConfig {
 
                         // Public funding discovery endpoints
                         .requestMatchers(
+                                HttpMethod.GET,
                                 "/api/funder/programmes/active",
+                                "/api/funder/programmes/active/",
                                 "/api/funder/programmes/industry/**",
                                 "/api/funder/programmes/stage/**"
                         )

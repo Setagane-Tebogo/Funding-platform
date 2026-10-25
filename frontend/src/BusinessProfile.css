@@ -179,3 +179,11 @@
     flex-direction: column;
   }
 }
+
+.ai-assessment {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 12px;
+  background: #f3f0ff;
+  border: 1px solid #d9d0ff;
+}

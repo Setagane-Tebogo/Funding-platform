@@ -335,6 +335,13 @@ function BusinessProfile() {
               {analysis.estimatedBreakEvenMonths !== null && <p>Estimated break-even: <strong>{analysis.estimatedBreakEvenMonths} months</strong></p>}
               <p>Estimated monthly profit: R{Number(analysis.estimatedMonthlyProfit).toLocaleString()}</p>
               <small>{analysis.disclaimer}</small>
+              {analysis.aiAssessment && (
+                <div className="ai-assessment">
+                  <strong>Grok assessment: {analysis.aiAssessment.recommendation}</strong>
+                  <p>{analysis.aiAssessment.narrative}</p>
+                  {analysis.aiAssessment.keyRisks?.length > 0 && <small>Key risks: {analysis.aiAssessment.keyRisks.join("; ")}</small>}
+                </div>
+              )}
             </div>
           )}
         </div>

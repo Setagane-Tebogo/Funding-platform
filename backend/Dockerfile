@@ -1,10 +1,6 @@
-FROM eclipse-temurin:17-jdk
-
+FROM python:3.12-slim
 WORKDIR /app
-
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
-
-RUN chmod +x mvnw
-RUN ./mvnw clean package -DskipTests
-
-CMD ["sh", "-c", "java -jar target/backend-0.0.1-SNAPSHOT.jar"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]

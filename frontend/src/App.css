@@ -543,3 +543,68 @@ footer {
   height: auto;
   display: block;
 }
+
+.brand-button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.dashboard-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 32px;
+  margin-bottom: 24px;
+  border-radius: 24px;
+  color: #fff;
+  background: linear-gradient(120deg, #192f68 0%, #246bb2 54%, #18a16d 100%);
+  box-shadow: 0 18px 40px rgba(30, 67, 126, .18);
+}
+.dashboard-hero .eyebrow { color: #b9d9ff; }
+.dashboard-hero h1 { max-width: 600px; }
+.dashboard-hero .subtitle { color: #e5efff; margin-bottom: 0; }
+.dashboard-hero .primary-button { background: #fff; color: #18366f; white-space: nowrap; }
+.dashboard-hero .primary-button:hover { background: #edf6ff; }
+.dashboard-stats { margin-bottom: 24px; }
+.dashboard-stats .stat-card { min-height: 150px; }
+.dashboard-stats .stat-card h2 { font-size: 25px; }
+.dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr); gap: 22px; }
+.dashboard-panel, .insight-panel { min-height: 270px; }
+.panel-heading h3 { margin: 0; font-size: 22px; }
+.action-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 24px; }
+.action-card { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: 156px; padding: 16px; border: 1px solid #ececf5; border-radius: 16px; background: #fbfbfe; color: #20243a; text-align: left; transition: transform .2s, box-shadow .2s, border-color .2s; }
+.action-card:hover { transform: translateY(-3px); border-color: #c9c4ff; box-shadow: 0 10px 24px rgba(50, 43, 140, .1); }
+.action-card strong { font-size: 14px; }
+.action-card small { color: #7b8096; line-height: 1.45; }
+.action-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; font-size: 18px; font-weight: 800; }
+.action-icon.purple { background: #eae7ff; color: #5545d8; }
+.action-icon.blue { background: #e0efff; color: #2470c7; }
+.action-icon.green { background: #e0f7ed; color: #14845a; }
+.action-arrow { margin-top: auto; color: #5545d8; font-weight: 800; }
+.insight-panel { background: linear-gradient(160deg, #f1efff, #fff); border-color: #dedaff; }
+.insight-mark { display: grid; place-items: center; width: 42px; height: 42px; margin-bottom: 18px; border-radius: 13px; background: #5545d8; color: #fff; font-size: 22px; }
+.insight-panel h3 { margin: 0 0 10px; font-size: 22px; line-height: 1.25; }
+.insight-panel p:not(.eyebrow) { color: #6e7287; line-height: 1.6; }
+@media (max-width: 900px) {
+  .dashboard-hero { align-items: flex-start; flex-direction: column; }
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .action-grid { grid-template-columns: 1fr; }
+}
+
+.role-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; }
+.role-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 20px; }
+.role-form label { display: grid; gap: 6px; color: #555a72; font-size: 12px; }
+.role-form input, .role-form textarea { width: 100%; padding: 11px; border: 1px solid #deddec; border-radius: 9px; font: inherit; }
+.role-form button { width: fit-content; }
+.admin-count { padding: 8px 12px; border-radius: 999px; background: #f0efff; color: #5444d2; font-size: 12px; font-weight: 700; }
+.admin-list { display: grid; gap: 12px; margin-top: 20px; }
+.admin-card { display: flex; justify-content: space-between; gap: 18px; align-items: center; padding: 18px; border: 1px solid #ececf5; border-radius: 14px; background: #fff; }
+.admin-card strong { font-size: 16px; }
+.admin-card p, .admin-card small { display: block; margin: 5px 0 0; color: #7b8096; }
+.admin-actions { display: flex; gap: 8px; }
+.danger-button { border: 1px solid #f0c9d0; border-radius: 9px; padding: 10px 14px; background: #fff4f5; color: #b23a50; }
+@media (max-width: 800px) { .role-columns { grid-template-columns: 1fr; } .role-form { grid-template-columns: 1fr; } .admin-card { align-items: flex-start; flex-direction: column; } }

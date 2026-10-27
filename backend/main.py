@@ -236,6 +236,13 @@ app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, "http:/
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
+    admin_email = os.getenv("ADMIN_EMAIL")
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    if admin_email and admin_password:
+        with SessionLocal() as db:
+            if not db.scalar(select(User).where(User.email == admin_email.strip().lower())):
+                db.add(User(name=os.getenv("ADMIN_NAME", "FundBridge Administrator"), email=admin_email.strip().lower(), password=hash_password(admin_password), role="ADMIN"))
+                db.commit()
 
 
 @app.get("/", include_in_schema=False)
@@ -253,9 +260,22 @@ def register(request: RegisterRequest, db: Session = Depends(db_session)):
     email = request.email.strip().lower()
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(status_code=400, detail="Email already registered")
-    user = User(name=request.name.strip(), email=email, password=hash_password(request.password), role="ENTREPRENEUR")
-    db.add(user); db.commit(); db.refresh(user)
-    return user_response(user)
+    account_type = request.accountType.strip().upper()
+    if account_type not in {"ENTREPRENEUR", "ORGANISATION"}:
+        raise HTTPException(status_code=400, detail="Choose entrepreneur or organisation registration")
+    role = "ENTREPRENEUR" if account_type == "ENTREPRENEUR" else "PENDING_FUNDER"
+    if account_type == "ORGANISATION" and not request.organisationName:
+        raise HTTPException(status_code=400, detail="Organisation name is required")
+    user = User(name=request.name.strip(), email=email, password=hash_password(request.password), role=role)
+    db.add(user); db.flush()
+    if account_type == "ORGANISATION":
+        db.add(FunderOrganisation(user_id=user.id, organisation_name=request.organisationName.strip(), organisation_type=request.organisationType, description=request.description, website=request.website, phone=request.phone, location=request.location))
+    db.commit(); db.refresh(user)
+    response = user_response(user)
+    if account_type == "ORGANISATION":
+        response["message"] = "Organisation registration submitted. An administrator must approve it before login."
+        response["pendingApproval"] = True
+    return response
 
 
 @app.post("/api/auth/login")
@@ -263,8 +283,11 @@ def login(request: LoginRequest, db: Session = Depends(db_session)):
     user = db.scalar(select(User).where(User.email == request.email.strip().lower()))
     if not user or not verify_password(request.password, user.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    if user.role == "PENDING_FUNDER":
+        raise HTTPException(status_code=403, detail="Organisation account is waiting for administrator approval")
+    if user.role == "REJECTED_FUNDER":
+        raise HTTPException(status_code=403, detail="Organisation registration was not approved")
     return {"token": make_token(user), **user_response(user)}
-
 
 @app.get("/api/entrepreneur/dashboard")
 def entrepreneur_dashboard(user: User = Depends(require_role("ENTREPRENEUR"))):
@@ -406,3 +429,32 @@ def my_programmes(user: User = Depends(require_role("FUNDER")), db: Session = De
 def protected_test(user: User = Depends(current_user)):
     return f"Authenticated successfully as: {user.email}"
 
+
+@app.get("/api/admin/organisations/pending")
+def pending_organisations(user: User = Depends(require_role("ADMIN")), db: Session = Depends(db_session)):
+    rows = db.scalars(select(FunderOrganisation).join(User, FunderOrganisation.user_id == User.id).where(User.role == "PENDING_FUNDER").order_by(FunderOrganisation.created_at.desc())).all()
+    result = []
+    for row in rows:
+        applicant = db.get(User, row.user_id)
+        result.append({"userId": applicant.id, "name": applicant.name, "email": applicant.email, "organisation": organisation_response(row)})
+    return result
+
+
+@app.post("/api/admin/organisations/{user_id}/approve")
+def approve_organisation(user_id: int, user: User = Depends(require_role("ADMIN")), db: Session = Depends(db_session)):
+    applicant = db.get(User, user_id)
+    if not applicant or applicant.role != "PENDING_FUNDER":
+        raise HTTPException(status_code=404, detail="Pending organisation not found")
+    applicant.role = "FUNDER"
+    db.commit()
+    return {"message": "Organisation approved", "user": user_response(applicant)}
+
+
+@app.post("/api/admin/organisations/{user_id}/reject")
+def reject_organisation(user_id: int, user: User = Depends(require_role("ADMIN")), db: Session = Depends(db_session)):
+    applicant = db.get(User, user_id)
+    if not applicant or applicant.role != "PENDING_FUNDER":
+        raise HTTPException(status_code=404, detail="Pending organisation not found")
+    applicant.role = "REJECTED_FUNDER"
+    db.commit()
+    return {"message": "Organisation rejected"}

@@ -277,3 +277,12 @@
   height: auto;
   display: block;
 }
+
+.account-type-panel { margin: 16px 0; padding: 14px; border: 1px solid #e7e5f5; border-radius: 14px; background: #fafaff; }
+.account-type-panel .auth-eyebrow { margin-bottom: 10px; }
+.account-type-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.account-type-options button { border: 1px solid #deddec; border-radius: 9px; padding: 10px; background: #fff; color: #6d7085; }
+.account-type-options button.selected { border-color: #5848d8; background: #eeeaff; color: #4f3dcc; font-weight: 700; }
+.organisation-fields { display: grid; gap: 10px; margin-top: 12px; }
+.organisation-fields label { display: grid; gap: 5px; font-size: 12px; color: #555a72; }
+.organisation-fields input { width: 100%; padding: 10px; border: 1px solid #deddec; border-radius: 8px; }

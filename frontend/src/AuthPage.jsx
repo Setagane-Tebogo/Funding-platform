@@ -10,6 +10,10 @@ export default function AuthPage({ onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [accountType, setAccountType] = useState("ENTREPRENEUR");
+  const [organisationName, setOrganisationName] = useState("");
+  const [organisationType, setOrganisationType] = useState("");
+  const [location, setLocation] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -49,7 +53,7 @@ export default function AuthPage({ onLogin }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(
             isRegistering
-              ? { name: name.trim(), email: email.trim(), password, role: "ENTREPRENEUR" }
+              ? { name: name.trim(), email: email.trim(), password, accountType, organisationName: organisationName.trim(), organisationType, location: location.trim() }
               : { email: email.trim(), password }
           ),
         }
@@ -177,6 +181,22 @@ export default function AuthPage({ onLogin }) {
             </button>
           </div>
 
+          {mode === "register" && (
+            <div className="account-type-panel">
+              <p className="auth-eyebrow">ACCOUNT TYPE</p>
+              <div className="account-type-options">
+                <button type="button" className={accountType === "ENTREPRENEUR" ? "selected" : ""} onClick={() => setAccountType("ENTREPRENEUR")}>Entrepreneur</button>
+                <button type="button" className={accountType === "ORGANISATION" ? "selected" : ""} onClick={() => setAccountType("ORGANISATION")}>Organisation</button>
+              </div>
+              {accountType === "ORGANISATION" && (
+                <div className="organisation-fields">
+                  <label>Organisation name<input value={organisationName} onChange={(event) => setOrganisationName(event.target.value)} required /></label>
+                  <label>Organisation type<input value={organisationType} onChange={(event) => setOrganisationType(event.target.value)} placeholder="Company, NGO, funder..." /></label>
+                  <label>Location<input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="City, province" /></label>
+                </div>
+              )}
+            </div>
+          )}
           {error && (
             <div className="auth-alert auth-error" role="alert">
               {error}

@@ -187,3 +187,11 @@
   background: #f3f0ff;
   border: 1px solid #d9d0ff;
 }
+@media (max-width: 480px) {
+  .business-profile-page { padding: 14px 0; }
+  .profile-panel { padding: 16px; border-radius: 13px; }
+  .profile-form-grid { grid-template-columns: 1fr; }
+  .profile-form-footer { align-items: stretch; flex-direction: column; gap: 12px; }
+  .profile-form-footer button, .analysis-box button { width: 100%; }
+  .analysis-box { padding: 16px; }
+}

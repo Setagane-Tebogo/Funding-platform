@@ -621,3 +621,42 @@ footer {
 .application-proposal { white-space: pre-wrap; text-align: left; }
 .application-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .application-edit { width: 100%; box-sizing: border-box; border: 1px solid #dfe1ed; border-radius: 9px; padding: 11px; font: inherit; resize: vertical; }
+
+/* Narrow-phone layout: keep every control inside a 320px viewport. */
+*, *::before, *::after { box-sizing: border-box; }
+img, svg { max-width: 100%; }
+button, input, textarea, select { max-width: 100%; }
+@media (max-width: 480px) {
+  .sidebar { width: 64px; padding: 16px 6px; }
+  .sidebar-logo { width: 42px; height: 42px; object-fit: contain; }
+  .nav-label, .nav-item { font-size: 0; justify-content: center; padding: 12px 4px; }
+  .nav-icon { font-size: 18px; margin: 0; }
+  .main-content { width: calc(100% - 64px); min-width: 0; }
+  .topbar { min-height: 70px; padding: 12px 14px; gap: 8px; align-items: flex-start; }
+  .breadcrumb { display: none; }
+  .user-menu { gap: 7px; min-width: 0; }
+  .user-menu > div:not(.avatar) { display: none; }
+  .logout-button { padding: 8px 9px; font-size: 12px; }
+  .page-content { padding: 18px 12px 32px; }
+  .dashboard-hero { padding: 22px 18px; border-radius: 16px; }
+  .dashboard-hero h1, .profile-heading h1 { font-size: clamp(25px, 8vw, 34px); line-height: 1.08; }
+  .subtitle { font-size: 14px; }
+  .stats-grid { grid-template-columns: 1fr; gap: 10px; }
+  .content-panel, .stat-card { padding: 16px; border-radius: 13px; }
+  .role-columns, .dashboard-grid { grid-template-columns: 1fr; gap: 14px; }
+  .role-form { grid-template-columns: 1fr; }
+  .role-form button, .primary-button, .secondary-button, .danger-button { width: 100%; }
+  .programme-grid { grid-template-columns: 1fr; gap: 10px; }
+  .programme-card { padding: 15px; min-width: 0; overflow-wrap: anywhere; }
+  .dashboard-tabs { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 5px; scrollbar-width: thin; }
+  .dashboard-tabs button { flex: 0 0 auto; white-space: nowrap; padding: 9px 12px; font-size: 12px; }
+  .admin-card { padding: 14px; gap: 12px; overflow-wrap: anywhere; }
+  .admin-actions, .application-actions, .modal-actions { width: 100%; flex-direction: column; }
+  .admin-actions select { width: 100%; }
+  .chat-layout { grid-template-columns: 1fr; }
+  .conversation-list { max-height: 145px; border-right: 0; border-bottom: 1px solid #ececf5; }
+  .chat-compose { flex-direction: column; }
+  .chat-compose button { width: 100%; }
+  .application-modal { padding: 18px; }
+  .application-modal .panel-heading { align-items: flex-start; }
+}

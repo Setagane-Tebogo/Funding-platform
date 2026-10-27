@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import "./BusinessProfile.css";
 
-const API_ROOT = import.meta.env.VITE_API_URL || (window.location.hostname === "localhost" ? "http://localhost:8080" : "https://funding-platform-4vyt.onrender.com");
+const API_ROOT = window.location.hostname === "localhost" ? (import.meta.env.VITE_API_URL || "http://localhost:8080") : "https://funding-platform-4vyt.onrender.com";
 const API_URL = `${API_ROOT}/api/entrepreneur/business-profile`;
 
 const emptyForm = {
@@ -351,4 +351,5 @@ function BusinessProfile() {
 }
 
 export default BusinessProfile;
+
 

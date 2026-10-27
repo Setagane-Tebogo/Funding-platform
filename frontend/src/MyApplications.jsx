@@ -1,20 +1,10 @@
 import { useEffect, useState } from "react";
-
+import ChatPanel from "./ChatPanel";
 const API_ROOT = import.meta.env.VITE_API_URL || "http://localhost:8080";
-
 export default function MyApplications() {
-  const [applications, setApplications] = useState([]);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    const timer = window.setTimeout(async () => {
-      try {
-        const response = await fetch(`${API_ROOT}/api/entrepreneur/applications`, { headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` } });
-        const data = await response.json();
-        if (!response.ok) throw new Error("Could not load applications.");
-        setApplications(data);
-      } catch (err) { setError(err.message); }
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
-  return <div className="content-panel"><p className="eyebrow">APPLICATION TRACKING</p><h1>My Applications</h1><p className="subtitle">Track the applications you have submitted to funders.</p>{error && <p className="profile-message error">{error}</p>}{applications.length === 0 && !error && <p>You have not submitted an application yet. Explore funding opportunities to get started.</p>}<div className="programme-grid">{applications.map((application) => <article className="programme-card" key={application.id}><p className="eyebrow">{application.status.replaceAll("_", " ")}</p><h3>{application.programmeName}</h3><p>{application.proposal}</p><small>Submitted {new Date(application.createdAt).toLocaleDateString()}</small></article>)}</div></div>;
+  const [applications, setApplications] = useState([]); const [error, setError] = useState(""); const [view, setView] = useState("applications"); const [chatTarget, setChatTarget] = useState(null);
+  async function load() { const response = await fetch(`${API_ROOT}/api/entrepreneur/applications`, { headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` } }); if (!response.ok) { setError("Could not load applications."); return; } setApplications(await response.json()); }
+  useEffect(() => { const timer = window.setTimeout(load, 0); return () => window.clearTimeout(timer); }, []);
+  function messageFunder(application) { if (!application.funderId) return; setChatTarget({ funderId: application.funderId, programmeId: application.programmeId }); setView("messages"); }
+  return <div><nav className="dashboard-tabs"><button className={view === "applications" ? "active" : ""} onClick={() => setView("applications")}>My applications</button><button className={view === "messages" ? "active" : ""} onClick={() => setView("messages")}>Messages</button></nav>{view === "messages" ? <ChatPanel startTarget={chatTarget} /> : <section className="content-panel"><p className="eyebrow">APPLICATION TRACKING</p><h1>My Applications</h1><p className="subtitle">Track each programme you applied to and communicate with the funder.</p>{error && <p className="profile-message error">{error}</p>}{applications.length === 0 && !error && <p>You have not submitted an application yet. Explore funding opportunities to get started.</p>}<div className="programme-grid">{applications.map((application) => <article className="programme-card" key={application.id}><p className="eyebrow">{application.status.replaceAll("_", " ")}</p><h3>{application.programmeName}</h3><small>{application.organisationName || "Funder"}</small><p>{application.proposal}</p><small>Submitted {new Date(application.createdAt).toLocaleDateString()}</small>{application.funderId && <button className="secondary-button" onClick={() => messageFunder(application)}>Message funder</button>}</article>)}</div></section>}</div>;
 }

@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-this-production-secret-to-a-long-random-value"
     frontend_url: str = "http://localhost:5173"
     xai_model: str = "grok-4"
+    environment: str = "development"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     def resolved_database_url(self) -> str:
@@ -73,6 +74,7 @@ class BusinessProfile(Base):
     intended_use_of_funds: Mapped[Optional[str]] = mapped_column(String(1000))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    analysis_result: Mapped[Optional[str]] = mapped_column(Text)
 
 
 class FunderOrganisation(Base):
@@ -117,6 +119,24 @@ class FundingApplication(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class ChatConversation(Base):
+    __tablename__ = "chat_conversations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entrepreneur_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    funder_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    programme_id: Mapped[Optional[int]] = mapped_column(ForeignKey("funding_programmes.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("chat_conversations.id"), nullable=False)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
 class RegisterRequest(BaseModel):
     name: str
     email: str
@@ -154,7 +174,16 @@ class AnalysisRequest(BaseModel):
 
 class ApplicationRequest(BaseModel):
     programmeId: int
-    proposal: str
+    proposal: str = Field(min_length=20, max_length=10000)
+
+class ConversationRequest(BaseModel):
+    entrepreneurId: Optional[int] = None
+    funderId: Optional[int] = None
+    programmeId: Optional[int] = None
+
+
+class MessageRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=5000)
 
 class ApplicationStatusRequest(BaseModel):
     status: str
@@ -245,9 +274,12 @@ app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, "http:/
 
 @app.on_event("startup")
 def startup():
+    if os.getenv("RENDER") and settings.resolved_jwt_secret() == "change-this-production-secret-to-a-long-random-value":
+        raise RuntimeError("APP_JWT_SECRET must be configured in production")
     Base.metadata.create_all(bind=engine)
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE funder_organisations ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) DEFAULT 'PENDING'"))
+        connection.execute(text("ALTER TABLE business_profiles ADD COLUMN IF NOT EXISTS analysis_result TEXT"))
     admin_email = os.getenv("ADMIN_EMAIL")
     admin_password = os.getenv("ADMIN_PASSWORD")
     if admin_email and admin_password:
@@ -270,13 +302,17 @@ def health():
 @app.post("/api/auth/register")
 def register(request: RegisterRequest, db: Session = Depends(db_session)):
     email = request.email.strip().lower()
+    if len(request.name.strip()) < 2:
+        raise HTTPException(status_code=422, detail="Name must contain at least 2 characters")
+    if "@" not in email or "." not in email.rsplit("@", 1)[-1]:
+        raise HTTPException(status_code=422, detail="Enter a valid email address")
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(status_code=400, detail="Email already registered")
     account_type = request.accountType.strip().upper()
     if account_type not in {"ENTREPRENEUR", "ORGANISATION"}:
         raise HTTPException(status_code=400, detail="Choose entrepreneur or organisation registration")
     role = "ENTREPRENEUR" if account_type == "ENTREPRENEUR" else "FUNDER"
-    if account_type == "ORGANISATION" and not request.organisationName:
+    if account_type == "ORGANISATION" and (not request.organisationName or len(request.organisationName.strip()) < 2):
         raise HTTPException(status_code=400, detail="Organisation name is required")
     user = User(name=request.name.strip(), email=email, password=hash_password(request.password), role=role)
     db.add(user); db.flush()
@@ -333,7 +369,7 @@ def update_profile(request: ProfileRequest, user: User = Depends(require_role("E
 
 
 def profile_response(profile: BusinessProfile) -> dict[str, Any]:
-    return {"id": profile.id, "businessName": profile.business_name, "industry": profile.industry, "businessStage": profile.business_stage, "description": profile.description, "location": profile.location, "fundingNeeded": profile.funding_needed, "intendedUseOfFunds": profile.intended_use_of_funds, "createdAt": profile.created_at, "updatedAt": profile.updated_at}
+    return {"id": profile.id, "businessName": profile.business_name, "industry": profile.industry, "businessStage": profile.business_stage, "description": profile.description, "location": profile.location, "fundingNeeded": profile.funding_needed, "intendedUseOfFunds": profile.intended_use_of_funds, "createdAt": profile.created_at, "updatedAt": profile.updated_at, "analysis": json.loads(profile.analysis_result) if profile.analysis_result else None}
 
 
 async def grok_assessment(request: AnalysisRequest, deterministic: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -361,6 +397,11 @@ async def analyse(request: AnalysisRequest, user: User = Depends(require_role("E
     result = {"outlook": outlook, "summary": summary, "estimatedBreakEvenMonths": break_even, "estimatedMonthlyProfit": profit, "estimatedAnnualProfit": profit * 12, "monthlyExpenses": request.monthlyExpenses, "confidence": "Medium" if profit > 0 else "Low", "disclaimer": "This is an advisory estimate based only on the figures you entered. It is not a funding or profit guarantee."}
     result["aiAssessment"] = await grok_assessment(request, result)
     result["aiProvider"] = "grok" if result["aiAssessment"] else "deterministic-fallback"
+    with SessionLocal() as db:
+        profile = db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == user.id))
+        if profile:
+            profile.analysis_result = json.dumps(result, default=str)
+            db.commit()
     return result
 
 
@@ -389,7 +430,9 @@ def my_applications(user: User = Depends(require_role("ENTREPRENEUR")), db: Sess
     result = []
     for row in rows:
         programme = db.get(FundingProgramme, row.programme_id)
-        result.append({"id": row.id, "programmeName": programme.programme_name if programme else "Unknown programme", "proposal": row.proposal, "status": row.status, "createdAt": row.created_at})
+        organisation = db.get(FunderOrganisation, programme.organisation_id) if programme else None
+        funder = db.get(User, organisation.user_id) if organisation else None
+        result.append({"id": row.id, "programmeId": row.programme_id, "programmeName": programme.programme_name if programme else "Unknown programme", "funderId": funder.id if funder else None, "organisationName": organisation.organisation_name if organisation else None, "proposal": row.proposal, "status": row.status, "createdAt": row.created_at})
     return result
 
 
@@ -397,13 +440,15 @@ def my_applications(user: User = Depends(require_role("ENTREPRENEUR")), db: Sess
 def submit_application(request: ApplicationRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
     programme = db.scalar(select(FundingProgramme).where(FundingProgramme.id == request.programmeId, FundingProgramme.active.is_(True)))
     if not programme: raise HTTPException(status_code=404, detail="Active funding programme not found.")
+    if db.scalar(select(FundingApplication).where(FundingApplication.entrepreneur_id == user.id, FundingApplication.programme_id == programme.id)):
+        raise HTTPException(status_code=409, detail="You have already applied to this programme")
     row = FundingApplication(entrepreneur_id=user.id, programme_id=programme.id, proposal=request.proposal.strip(), status="SUBMITTED")
     db.add(row); db.commit(); db.refresh(row)
     return {"id": row.id, "programmeName": programme.programme_name, "proposal": row.proposal, "status": row.status, "createdAt": row.created_at}
 
 
 def application_response(row: FundingApplication, programme: Optional[FundingProgramme], entrepreneur: Optional[User], organisation: Optional[FunderOrganisation] = None) -> dict[str, Any]:
-    return {"id": row.id, "programmeId": row.programme_id, "programmeName": programme.programme_name if programme else "Unknown programme", "organisationName": organisation.organisation_name if organisation else None, "entrepreneurId": entrepreneur.id if entrepreneur else row.entrepreneur_id, "entrepreneurName": entrepreneur.name if entrepreneur else "Unknown entrepreneur", "entrepreneurEmail": entrepreneur.email if entrepreneur else None, "proposal": row.proposal, "status": row.status, "createdAt": row.created_at}
+    return {"id": row.id, "programmeId": row.programme_id, "programmeName": programme.programme_name if programme else "Unknown programme", "organisationName": organisation.organisation_name if organisation else None, "analysis": (json.loads(db.scalar(select(BusinessProfile.analysis_result).where(BusinessProfile.user_id == row.entrepreneur_id)) or "null")), "entrepreneurId": entrepreneur.id if entrepreneur else row.entrepreneur_id, "entrepreneurName": entrepreneur.name if entrepreneur else "Unknown entrepreneur", "entrepreneurEmail": entrepreneur.email if entrepreneur else None, "proposal": row.proposal, "status": row.status, "createdAt": row.created_at}
 
 
 @app.get("/api/funder/entrepreneur-profiles")
@@ -428,6 +473,61 @@ def update_application_status(application_id: int, request: ApplicationStatusReq
     if new_status not in {"SUBMITTED", "REVIEWING", "ACCEPTED", "DECLINED"}: raise HTTPException(status_code=400, detail="Invalid application status")
     row.status = new_status; db.commit()
     return application_response(row, programme, db.get(User, row.entrepreneur_id), organisation)
+
+
+def conversation_response(row: ChatConversation, current_user_id: int, db: Session) -> dict[str, Any]:
+    entrepreneur = db.get(User, row.entrepreneur_id); funder = db.get(User, row.funder_id); programme = db.get(FundingProgramme, row.programme_id) if row.programme_id else None
+    last = db.scalar(select(ChatMessage).where(ChatMessage.conversation_id == row.id).order_by(ChatMessage.created_at.desc()))
+    return {"id": row.id, "entrepreneurId": row.entrepreneur_id, "entrepreneurName": entrepreneur.name if entrepreneur else "Entrepreneur", "funderId": row.funder_id, "funderName": funder.name if funder else "Funder", "programmeId": row.programme_id, "programmeName": programme.programme_name if programme else None, "lastMessage": last.content if last else None, "lastMessageAt": last.created_at if last else None, "createdAt": row.created_at}
+
+
+def can_access_conversation(row: ChatConversation, user: User) -> bool:
+    return user.role == "ADMIN" or user.id in {row.entrepreneur_id, row.funder_id}
+
+
+@app.get("/api/chat/conversations")
+def chat_conversations(user: User = Depends(current_user), db: Session = Depends(db_session)):
+    query = select(ChatConversation).order_by(ChatConversation.updated_at.desc()) if user.role == "ADMIN" else select(ChatConversation).where((ChatConversation.entrepreneur_id == user.id) | (ChatConversation.funder_id == user.id)).order_by(ChatConversation.updated_at.desc())
+    rows = db.scalars(query).all()
+    return [conversation_response(row, user.id, db) for row in rows]
+
+
+@app.post("/api/chat/conversations", status_code=201)
+def create_conversation(request: ConversationRequest, user: User = Depends(current_user), db: Session = Depends(db_session)):
+    entrepreneur_id = request.entrepreneurId if user.role == "FUNDER" else user.id
+    funder_id = request.funderId if user.role == "ENTREPRENEUR" else user.id
+    if user.role not in {"ENTREPRENEUR", "FUNDER"} or not entrepreneur_id or not funder_id or entrepreneur_id == funder_id:
+        raise HTTPException(status_code=400, detail="Choose a valid entrepreneur and funder conversation")
+    entrepreneur = db.get(User, entrepreneur_id); funder = db.get(User, funder_id)
+    if not entrepreneur or entrepreneur.role != "ENTREPRENEUR" or not funder or funder.role != "FUNDER": raise HTTPException(status_code=404, detail="User not found")
+    if request.programmeId:
+        programme = db.get(FundingProgramme, request.programmeId)
+        if not programme: raise HTTPException(status_code=404, detail="Programme not found")
+    organisation = db.scalar(select(FunderOrganisation).where(FunderOrganisation.user_id == funder_id))
+    connected = db.scalar(select(FundingApplication).join(FundingProgramme, FundingApplication.programme_id == FundingProgramme.id).where(FundingApplication.entrepreneur_id == entrepreneur_id, FundingProgramme.organisation_id == organisation.id)) if organisation else None
+    has_profile = db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == entrepreneur_id))
+    if not connected and not has_profile:
+        raise HTTPException(status_code=403, detail="Conversation is only available after a proposal or application connection")
+    row = db.scalar(select(ChatConversation).where(ChatConversation.entrepreneur_id == entrepreneur_id, ChatConversation.funder_id == funder_id, ChatConversation.programme_id == request.programmeId))
+    if not row:
+        row = ChatConversation(entrepreneur_id=entrepreneur_id, funder_id=funder_id, programme_id=request.programmeId); db.add(row); db.commit(); db.refresh(row)
+    return conversation_response(row, user.id, db)
+
+
+@app.get("/api/chat/conversations/{conversation_id}/messages")
+def chat_messages(conversation_id: int, user: User = Depends(current_user), db: Session = Depends(db_session)):
+    conversation = db.get(ChatConversation, conversation_id)
+    if not conversation or not can_access_conversation(conversation, user): raise HTTPException(status_code=404, detail="Conversation not found")
+    rows = db.scalars(select(ChatMessage).where(ChatMessage.conversation_id == conversation_id).order_by(ChatMessage.created_at.asc())).all()
+    return [{"id": row.id, "senderId": row.sender_id, "content": row.content, "createdAt": row.created_at} for row in rows]
+
+
+@app.post("/api/chat/conversations/{conversation_id}/messages", status_code=201)
+def send_chat_message(conversation_id: int, request: MessageRequest, user: User = Depends(current_user), db: Session = Depends(db_session)):
+    conversation = db.get(ChatConversation, conversation_id)
+    if not conversation or not can_access_conversation(conversation, user): raise HTTPException(status_code=404, detail="Conversation not found")
+    row = ChatMessage(conversation_id=conversation_id, sender_id=user.id, content=request.content.strip()); db.add(row); conversation.updated_at = datetime.utcnow(); db.commit(); db.refresh(row)
+    return {"id": row.id, "senderId": row.sender_id, "content": row.content, "createdAt": row.created_at}
 
 
 @app.post("/api/funder/organisation")

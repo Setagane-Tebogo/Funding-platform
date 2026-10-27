@@ -612,3 +612,12 @@ footer {
 .dashboard-tabs button { border: 1px solid #e4e3f0; background: #fff; color: #676b83; border-radius: 999px; padding: 10px 16px; cursor: pointer; font-weight: 700; }
 .dashboard-tabs button.active, .dashboard-tabs button:hover { background: #6152df; color: #fff; border-color: #6152df; }
 .application-panel { margin-top: 20px; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 20px; background: rgba(27, 29, 52, .45); }
+.application-modal { width: min(620px, 100%); max-height: 90vh; overflow-y: auto; display: grid; gap: 16px; padding: 26px; border-radius: 18px; background: #fff; box-shadow: 0 24px 80px rgba(26, 27, 55, .2); }
+.application-modal label { display: grid; gap: 7px; font-weight: 700; color: #343750; }
+.application-modal input, .application-modal textarea { width: 100%; box-sizing: border-box; border: 1px solid #dfe1ed; border-radius: 9px; padding: 11px 12px; font: inherit; resize: vertical; }
+.modal-close { border: 0; background: transparent; color: #777b92; font-size: 28px; cursor: pointer; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.application-proposal { white-space: pre-wrap; text-align: left; }
+.application-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.application-edit { width: 100%; box-sizing: border-box; border: 1px solid #dfe1ed; border-radius: 9px; padding: 11px; font: inherit; resize: vertical; }

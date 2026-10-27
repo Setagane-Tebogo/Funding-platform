@@ -176,6 +176,9 @@ class ApplicationRequest(BaseModel):
     programmeId: int
     proposal: str = Field(min_length=20, max_length=10000)
 
+class ApplicationUpdateRequest(BaseModel):
+    proposal: str = Field(min_length=20, max_length=10000)
+
 class ConversationRequest(BaseModel):
     entrepreneurId: Optional[int] = None
     funderId: Optional[int] = None
@@ -447,6 +450,23 @@ def submit_application(request: ApplicationRequest, user: User = Depends(require
     return {"id": row.id, "programmeName": programme.programme_name, "proposal": row.proposal, "status": row.status, "createdAt": row.created_at}
 
 
+@app.put("/api/entrepreneur/applications/{application_id}")
+def edit_application(application_id: int, request: ApplicationUpdateRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
+    row = db.get(FundingApplication, application_id)
+    if not row or row.entrepreneur_id != user.id: raise HTTPException(status_code=404, detail="Application not found")
+    if row.status in {"ACCEPTED", "DECLINED"}: raise HTTPException(status_code=409, detail="This application can no longer be edited")
+    row.proposal = request.proposal.strip(); db.commit(); db.refresh(row)
+    programme = db.get(FundingProgramme, row.programme_id); organisation = db.get(FunderOrganisation, programme.organisation_id) if programme else None
+    return application_response(row, programme, user, organisation)
+
+
+@app.delete("/api/entrepreneur/applications/{application_id}", status_code=204)
+def delete_application(application_id: int, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
+    row = db.get(FundingApplication, application_id)
+    if not row or row.entrepreneur_id != user.id: raise HTTPException(status_code=404, detail="Application not found")
+    if row.status in {"ACCEPTED", "DECLINED"}: raise HTTPException(status_code=409, detail="This application can no longer be deleted")
+    db.delete(row); db.commit(); return None
+
 def application_response(row: FundingApplication, programme: Optional[FundingProgramme], entrepreneur: Optional[User], organisation: Optional[FunderOrganisation] = None) -> dict[str, Any]:
     return {"id": row.id, "programmeId": row.programme_id, "programmeName": programme.programme_name if programme else "Unknown programme", "organisationName": organisation.organisation_name if organisation else None, "analysis": (json.loads(db.scalar(select(BusinessProfile.analysis_result).where(BusinessProfile.user_id == row.entrepreneur_id)) or "null")), "entrepreneurId": entrepreneur.id if entrepreneur else row.entrepreneur_id, "entrepreneurName": entrepreneur.name if entrepreneur else "Unknown entrepreneur", "entrepreneurEmail": entrepreneur.email if entrepreneur else None, "proposal": row.proposal, "status": row.status, "createdAt": row.created_at}
 
@@ -482,13 +502,12 @@ def conversation_response(row: ChatConversation, current_user_id: int, db: Sessi
 
 
 def can_access_conversation(row: ChatConversation, user: User) -> bool:
-    return user.role == "ADMIN" or user.id in {row.entrepreneur_id, row.funder_id}
+    return user.id in {row.entrepreneur_id, row.funder_id}
 
 
 @app.get("/api/chat/conversations")
 def chat_conversations(user: User = Depends(current_user), db: Session = Depends(db_session)):
-    query = select(ChatConversation).order_by(ChatConversation.updated_at.desc()) if user.role == "ADMIN" else select(ChatConversation).where((ChatConversation.entrepreneur_id == user.id) | (ChatConversation.funder_id == user.id)).order_by(ChatConversation.updated_at.desc())
-    rows = db.scalars(query).all()
+    rows = db.scalars(select(ChatConversation).where((ChatConversation.entrepreneur_id == user.id) | (ChatConversation.funder_id == user.id)).order_by(ChatConversation.updated_at.desc())).all()
     return [conversation_response(row, user.id, db) for row in rows]
 
 

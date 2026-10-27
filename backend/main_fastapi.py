@@ -163,9 +163,11 @@ class ProfileRequest(BaseModel):
     location: str
     fundingNeeded: Optional[Decimal] = None
     intendedUseOfFunds: Optional[str] = None
+    analysis: Optional[dict[str, Any]] = None
 
 
 class AnalysisRequest(BaseModel):
+    profileId: Optional[int] = None
     startupCosts: Decimal
     monthlyRevenue: Decimal
     monthlyExpenses: Decimal
@@ -349,9 +351,7 @@ def entrepreneur_dashboard(user: User = Depends(require_role("ENTREPRENEUR"))):
 
 @app.post("/api/entrepreneur/business-profile", status_code=201)
 def create_profile(request: ProfileRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
-    if db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == user.id)):
-        raise HTTPException(status_code=400, detail="Business profile already exists")
-    profile = BusinessProfile(user_id=user.id, business_name=request.businessName, industry=request.industry, business_stage=request.businessStage, description=request.description, location=request.location, funding_needed=request.fundingNeeded, intended_use_of_funds=request.intendedUseOfFunds)
+    profile = BusinessProfile(user_id=user.id, business_name=request.businessName, industry=request.industry, business_stage=request.businessStage, description=request.description, location=request.location, funding_needed=request.fundingNeeded, intended_use_of_funds=request.intendedUseOfFunds, analysis_result=json.dumps(request.analysis, default=str) if request.analysis else None)
     db.add(profile); db.commit(); db.refresh(profile)
     return profile_response(profile)
 
@@ -372,7 +372,7 @@ def get_profile(user: User = Depends(require_role("ENTREPRENEUR")), db: Session 
 def update_business_profile(profile_id: int, request: ProfileRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
     profile = db.scalar(select(BusinessProfile).where(BusinessProfile.id == profile_id, BusinessProfile.user_id == user.id))
     if not profile: raise HTTPException(status_code=404, detail="Business profile not found")
-    for key, value in {"business_name": request.businessName, "industry": request.industry, "business_stage": request.businessStage, "description": request.description, "location": request.location, "funding_needed": request.fundingNeeded, "intended_use_of_funds": request.intendedUseOfFunds}.items(): setattr(profile, key, value)
+    for key, value in {"business_name": request.businessName, "industry": request.industry, "business_stage": request.businessStage, "description": request.description, "location": request.location, "funding_needed": request.fundingNeeded, "intended_use_of_funds": request.intendedUseOfFunds, "analysis_result": json.dumps(request.analysis, default=str) if request.analysis else profile.analysis_result}.items(): setattr(profile, key, value)
     db.commit(); db.refresh(profile); return profile_response(profile)
 
 
@@ -387,7 +387,7 @@ def delete_business_profile(profile_id: int, user: User = Depends(require_role("
 def update_profile(request: ProfileRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
     profile = db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == user.id).order_by(BusinessProfile.updated_at.desc()))
     if not profile: raise HTTPException(status_code=404, detail="Business profile not found")
-    for key, value in {"business_name": request.businessName, "industry": request.industry, "business_stage": request.businessStage, "description": request.description, "location": request.location, "funding_needed": request.fundingNeeded, "intended_use_of_funds": request.intendedUseOfFunds}.items(): setattr(profile, key, value)
+    for key, value in {"business_name": request.businessName, "industry": request.industry, "business_stage": request.businessStage, "description": request.description, "location": request.location, "funding_needed": request.fundingNeeded, "intended_use_of_funds": request.intendedUseOfFunds, "analysis_result": json.dumps(request.analysis, default=str) if request.analysis else profile.analysis_result}.items(): setattr(profile, key, value)
     db.commit(); db.refresh(profile)
     return profile_response(profile)
 
@@ -595,6 +595,24 @@ def create_programme(request: ProgrammeRequest, user: User = Depends(require_rol
     row = FundingProgramme(organisation_id=organisation.id, programme_name=request.programmeName, funding_type=request.fundingType, minimum_funding=request.minimumFunding, maximum_funding=request.maximumFunding, industry=request.industry, business_stage=request.businessStage, location=request.location, description=request.description, requirements=request.requirements, application_deadline=request.applicationDeadline, active=True)
     db.add(row); db.commit(); db.refresh(row)
     return programme_response(row, organisation.organisation_name)
+
+
+@app.put("/api/funder/programmes/{programme_id}")
+def edit_programme(programme_id: int, request: ProgrammeRequest, user: User = Depends(require_role("FUNDER")), db: Session = Depends(db_session)):
+    organisation = db.scalar(select(FunderOrganisation).where(FunderOrganisation.user_id == user.id))
+    programme = db.get(FundingProgramme, programme_id)
+    if not programme or not organisation or programme.organisation_id != organisation.id:
+        raise HTTPException(status_code=404, detail="Programme not found")
+    for key, value in {"programme_name": request.programmeName, "funding_type": request.fundingType, "minimum_funding": request.minimumFunding, "maximum_funding": request.maximumFunding, "industry": request.industry, "business_stage": request.businessStage, "location": request.location, "description": request.description, "requirements": request.requirements, "application_deadline": request.applicationDeadline}.items(): setattr(programme, key, value)
+    db.commit(); db.refresh(programme)
+    return programme_response(programme, organisation.organisation_name)
+
+
+@app.delete("/api/funder/programmes/{programme_id}", status_code=204)
+def delete_programme(programme_id: int, user: User = Depends(require_role("FUNDER")), db: Session = Depends(db_session)):
+    organisation = db.scalar(select(FunderOrganisation).where(FunderOrganisation.user_id == user.id)); programme = db.get(FundingProgramme, programme_id)
+    if not programme or not organisation or programme.organisation_id != organisation.id: raise HTTPException(status_code=404, detail="Programme not found")
+    programme.active = False; db.commit(); return None
 
 
 @app.get("/api/funder/programmes")

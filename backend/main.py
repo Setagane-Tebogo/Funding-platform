@@ -64,7 +64,7 @@ class User(Base):
 class BusinessProfile(Base):
     __tablename__ = "business_profiles"
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     business_name: Mapped[str] = mapped_column(String(255), nullable=False)
     industry: Mapped[str] = mapped_column(String(255), nullable=False)
     business_stage: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -80,7 +80,7 @@ class BusinessProfile(Base):
 class FunderOrganisation(Base):
     __tablename__ = "funder_organisations"
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     organisation_name: Mapped[str] = mapped_column(String(255), nullable=False)
     organisation_type: Mapped[Optional[str]] = mapped_column(String(255))
     description: Mapped[Optional[str]] = mapped_column(Text)
@@ -283,6 +283,7 @@ def startup():
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE funder_organisations ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) DEFAULT 'PENDING'"))
         connection.execute(text("ALTER TABLE business_profiles ADD COLUMN IF NOT EXISTS analysis_result TEXT"))
+        connection.execute(text("ALTER TABLE business_profiles DROP CONSTRAINT IF EXISTS business_profiles_user_id_key"))
     admin_email = os.getenv("ADMIN_EMAIL")
     admin_password = os.getenv("ADMIN_PASSWORD")
     if admin_email and admin_password:
@@ -355,16 +356,36 @@ def create_profile(request: ProfileRequest, user: User = Depends(require_role("E
     return profile_response(profile)
 
 
+@app.get("/api/entrepreneur/business-profiles")
+def list_business_profiles(user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
+    return [profile_response(row) for row in db.scalars(select(BusinessProfile).where(BusinessProfile.user_id == user.id).order_by(BusinessProfile.updated_at.desc())).all()]
+
+
 @app.get("/api/entrepreneur/business-profile")
 def get_profile(user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
-    profile = db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == user.id))
+    profile = db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == user.id).order_by(BusinessProfile.updated_at.desc()))
     if not profile: raise HTTPException(status_code=404, detail="Business profile not found")
     return profile_response(profile)
 
 
+@app.put("/api/entrepreneur/business-profiles/{profile_id}")
+def update_business_profile(profile_id: int, request: ProfileRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
+    profile = db.scalar(select(BusinessProfile).where(BusinessProfile.id == profile_id, BusinessProfile.user_id == user.id))
+    if not profile: raise HTTPException(status_code=404, detail="Business profile not found")
+    for key, value in {"business_name": request.businessName, "industry": request.industry, "business_stage": request.businessStage, "description": request.description, "location": request.location, "funding_needed": request.fundingNeeded, "intended_use_of_funds": request.intendedUseOfFunds}.items(): setattr(profile, key, value)
+    db.commit(); db.refresh(profile); return profile_response(profile)
+
+
+@app.delete("/api/entrepreneur/business-profiles/{profile_id}", status_code=204)
+def delete_business_profile(profile_id: int, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
+    profile = db.scalar(select(BusinessProfile).where(BusinessProfile.id == profile_id, BusinessProfile.user_id == user.id))
+    if not profile: raise HTTPException(status_code=404, detail="Business profile not found")
+    db.delete(profile); db.commit(); return None
+
+
 @app.put("/api/entrepreneur/business-profile")
 def update_profile(request: ProfileRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
-    profile = db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == user.id))
+    profile = db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == user.id).order_by(BusinessProfile.updated_at.desc()))
     if not profile: raise HTTPException(status_code=404, detail="Business profile not found")
     for key, value in {"business_name": request.businessName, "industry": request.industry, "business_stage": request.businessStage, "description": request.description, "location": request.location, "funding_needed": request.fundingNeeded, "intended_use_of_funds": request.intendedUseOfFunds}.items(): setattr(profile, key, value)
     db.commit(); db.refresh(profile)
@@ -391,7 +412,7 @@ async def grok_assessment(request: AnalysisRequest, deterministic: dict[str, Any
         return None
 
 @app.post("/api/entrepreneur/business-analysis")
-async def analyse(request: AnalysisRequest, user: User = Depends(require_role("ENTREPRENEUR"))):
+async def analyse(request: AnalysisRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
     if min(request.startupCosts, request.monthlyRevenue, request.monthlyExpenses) < 0: raise HTTPException(status_code=400, detail="Financial values cannot be negative.")
     profit = request.monthlyRevenue - request.monthlyExpenses
     break_even = int((request.startupCosts / profit).to_integral_value(rounding="ROUND_CEILING")) if profit > 0 else None
@@ -400,11 +421,10 @@ async def analyse(request: AnalysisRequest, user: User = Depends(require_role("E
     result = {"outlook": outlook, "summary": summary, "estimatedBreakEvenMonths": break_even, "estimatedMonthlyProfit": profit, "estimatedAnnualProfit": profit * 12, "monthlyExpenses": request.monthlyExpenses, "confidence": "Medium" if profit > 0 else "Low", "disclaimer": "This is an advisory estimate based only on the figures you entered. It is not a funding or profit guarantee."}
     result["aiAssessment"] = await grok_assessment(request, result)
     result["aiProvider"] = "grok" if result["aiAssessment"] else "deterministic-fallback"
-    with SessionLocal() as db:
-        profile = db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == user.id))
-        if profile:
-            profile.analysis_result = json.dumps(result, default=str)
-            db.commit()
+    profile = db.scalar(select(BusinessProfile).where(BusinessProfile.id == request.profileId, BusinessProfile.user_id == user.id)) if request.profileId else db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == user.id).order_by(BusinessProfile.updated_at.desc()))
+    if profile:
+        profile.analysis_result = json.dumps(result, default=str)
+        db.commit()
     return result
 
 

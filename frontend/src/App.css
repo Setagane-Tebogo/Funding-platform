@@ -660,3 +660,4 @@ button, input, textarea, select { max-width: 100%; }
   .application-modal { padding: 18px; }
   .application-modal .panel-heading { align-items: flex-start; }
 }
+.nav-icon { display: none; }

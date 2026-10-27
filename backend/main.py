@@ -457,7 +457,7 @@ def edit_application(application_id: int, request: ApplicationUpdateRequest, use
     if row.status in {"ACCEPTED", "DECLINED"}: raise HTTPException(status_code=409, detail="This application can no longer be edited")
     row.proposal = request.proposal.strip(); db.commit(); db.refresh(row)
     programme = db.get(FundingProgramme, row.programme_id); organisation = db.get(FunderOrganisation, programme.organisation_id) if programme else None
-    return application_response(row, programme, user, organisation)
+    return application_response(row, programme, user, organisation, db)
 
 
 @app.delete("/api/entrepreneur/applications/{application_id}", status_code=204)
@@ -467,7 +467,7 @@ def delete_application(application_id: int, user: User = Depends(require_role("E
     if row.status in {"ACCEPTED", "DECLINED"}: raise HTTPException(status_code=409, detail="This application can no longer be deleted")
     db.delete(row); db.commit(); return None
 
-def application_response(row: FundingApplication, programme: Optional[FundingProgramme], entrepreneur: Optional[User], organisation: Optional[FunderOrganisation] = None) -> dict[str, Any]:
+def application_response(row: FundingApplication, programme: Optional[FundingProgramme], entrepreneur: Optional[User], organisation: Optional[FunderOrganisation] = None, db: Session = None) -> dict[str, Any]:
     return {"id": row.id, "programmeId": row.programme_id, "programmeName": programme.programme_name if programme else "Unknown programme", "organisationName": organisation.organisation_name if organisation else None, "analysis": (json.loads(db.scalar(select(BusinessProfile.analysis_result).where(BusinessProfile.user_id == row.entrepreneur_id)) or "null")), "entrepreneurId": entrepreneur.id if entrepreneur else row.entrepreneur_id, "entrepreneurName": entrepreneur.name if entrepreneur else "Unknown entrepreneur", "entrepreneurEmail": entrepreneur.email if entrepreneur else None, "proposal": row.proposal, "status": row.status, "createdAt": row.created_at}
 
 
@@ -482,7 +482,7 @@ def funder_applications(user: User = Depends(require_role("FUNDER")), db: Sessio
     organisation = db.scalar(select(FunderOrganisation).where(FunderOrganisation.user_id == user.id))
     if not organisation: raise HTTPException(status_code=404, detail="Organisation profile not found")
     rows = db.scalars(select(FundingApplication).join(FundingProgramme, FundingApplication.programme_id == FundingProgramme.id).where(FundingProgramme.organisation_id == organisation.id).order_by(FundingApplication.created_at.desc())).all()
-    return [application_response(row, db.get(FundingProgramme, row.programme_id), db.get(User, row.entrepreneur_id), organisation) for row in rows]
+    return [application_response(row, db.get(FundingProgramme, row.programme_id), db.get(User, row.entrepreneur_id), organisation, db) for row in rows]
 
 
 @app.patch("/api/funder/applications/{application_id}")
@@ -492,7 +492,7 @@ def update_application_status(application_id: int, request: ApplicationStatusReq
     if not row or not programme or not organisation or programme.organisation_id != organisation.id: raise HTTPException(status_code=404, detail="Application not found")
     if new_status not in {"SUBMITTED", "REVIEWING", "ACCEPTED", "DECLINED"}: raise HTTPException(status_code=400, detail="Invalid application status")
     row.status = new_status; db.commit()
-    return application_response(row, programme, db.get(User, row.entrepreneur_id), organisation)
+    return application_response(row, programme, db.get(User, row.entrepreneur_id), organisation, db)
 
 
 def conversation_response(row: ChatConversation, current_user_id: int, db: Session) -> dict[str, Any]:
@@ -601,7 +601,7 @@ def admin_applications(user: User = Depends(require_role("ADMIN")), db: Session 
     rows = db.scalars(select(FundingApplication).order_by(FundingApplication.created_at.desc())).all(); result = []
     for row in rows:
         programme = db.get(FundingProgramme, row.programme_id); organisation = db.get(FunderOrganisation, programme.organisation_id) if programme else None
-        result.append(application_response(row, programme, db.get(User, row.entrepreneur_id), organisation))
+        result.append(application_response(row, programme, db.get(User, row.entrepreneur_id), organisation, db))
     return result
 
 

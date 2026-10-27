@@ -30,9 +30,11 @@ class Settings(BaseSettings):
         if value.startswith("jdbc:"):
             value = value[5:]
         if value.startswith("postgresql://"):
-            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+            value = value.replace("postgresql://", "postgresql+psycopg://", 1)
         if value.startswith("postgres://"):
-            return value.replace("postgres://", "postgresql+psycopg://", 1)
+            value = value.replace("postgres://", "postgresql+psycopg://", 1)
+        if value.startswith("postgresql+psycopg://") and "sslmode=" not in value:
+            value += "?sslmode=require"
         return value
 
     def resolved_jwt_secret(self) -> str:

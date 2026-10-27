@@ -537,3 +537,9 @@ footer {
     margin-left: 46px;
   }
 }
+
+.sidebar-logo {
+  width: 150px;
+  height: auto;
+  display: block;
+}

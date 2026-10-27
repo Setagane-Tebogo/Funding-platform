@@ -105,8 +105,8 @@ export default function AuthPage({ onLogin }) {
     <main className="auth-page">
       <section className="auth-brand-panel">
         <div className="auth-brand">
-          <span className="auth-brand-icon">F</span>
-          <span>FundBridge</span>
+          <img src="/fundbridge-logo.png" alt="FundBridge" className="auth-logo" />
+          
         </div>
 
         <div className="auth-brand-content">
@@ -142,8 +142,7 @@ export default function AuthPage({ onLogin }) {
       <section className="auth-form-panel">
         <div className="auth-form-container">
           <div className="auth-mobile-brand">
-            <span className="auth-brand-icon">F</span>
-            <strong>FundBridge</strong>
+            <img src="/fundbridge-logo.png" alt="FundBridge" className="auth-logo-mobile" />
           </div>
 
           <p className="auth-eyebrow">
@@ -275,13 +274,7 @@ export default function AuthPage({ onLogin }) {
             >
               {mode === "login" ? "Create an account" : "Log in"}
             </button>
-          </p>
-
-          <p className="auth-security-note">
-            Your account credentials are sent to your backend over the
-            local development connection. Use HTTPS when deploying.
-          </p>
-        </div>
+          </p>        </div>
       </section>
     </main>
   );

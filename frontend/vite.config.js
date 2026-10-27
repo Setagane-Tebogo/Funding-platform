@@ -5,5 +5,4 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   cacheDir: './.vite-cache',
-  optimizeDeps: { disabled: true },
 })

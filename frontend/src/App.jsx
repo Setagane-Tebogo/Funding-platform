@@ -11,7 +11,6 @@ const menuItems = [
   { label: "Business Profile", icon: "◈" },
   { label: "Find Funding", icon: "⌕" },
   { label: "My Applications", icon: "▤" },
-  { label: "Documents", icon: "▧" },
 ];
 
 function App() {
@@ -52,18 +51,6 @@ function App() {
 
       case "My Applications":
         return <MyApplications />;
-
-      case "Documents":
-        return (
-          <div className="content-panel placeholder-page">
-            <p className="eyebrow">DOCUMENT MANAGEMENT</p>
-            <h1>Documents</h1>
-            <p className="subtitle">
-              Keep the documents needed for funding applications organised.
-            </p>
-            <p>Document uploads will be added here.</p>
-          </div>
-        );
 
       default:
         return (
@@ -133,17 +120,7 @@ function App() {
                     <span className="check-arrow">→</span>
                   </button>
 
-                  <button
-                    className="checklist-item"
-                    onClick={() => setActivePage("Documents")}
-                  >
-                    <span className="check-circle">2</span>
-                    <span className="checklist-text">
-                      <strong>Prepare your documents</strong>
-                      <small>Organise documents for your applications.</small>
-                    </span>
-                    <span className="check-arrow">→</span>
-                  </button>
+
 
                   <button
                     className="checklist-item"
@@ -192,12 +169,7 @@ function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-icon">F</div>
-          <div>
-            <strong>FundBridge</strong>
-            <span>Funding platform</span>
-          </div>
-        </div>
+          <img src="/fundbridge-logo.png" alt="FundBridge" className="sidebar-logo" />
 
         <p className="nav-label">WORKSPACE</p>
 
@@ -216,12 +188,7 @@ function App() {
           ))}
         </nav>
 
-        <div className="sidebar-bottom">
-          <div className="help-icon">?</div>
-          <div>
-            <strong>Need assistance?</strong>
-            <p>We're here to help.</p>
-          </div>
+
         </div>
       </aside>
 

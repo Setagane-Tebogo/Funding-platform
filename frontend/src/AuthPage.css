@@ -265,3 +265,15 @@
     padding: 35px 22px;
   }
 }
+
+.auth-logo {
+  width: 210px;
+  height: auto;
+  display: block;
+}
+
+.auth-logo-mobile {
+  width: 170px;
+  height: auto;
+  display: block;
+}

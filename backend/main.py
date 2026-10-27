@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import json
+import httpx
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any, Optional
@@ -20,6 +22,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://postgres:postgres@localhost:5432/funding_platform"
     jwt_secret: str = "change-this-production-secret-to-a-long-random-value"
     frontend_url: str = "http://localhost:5173"
+    xai_model: str = "grok-4"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     def resolved_database_url(self) -> str:
@@ -27,9 +30,11 @@ class Settings(BaseSettings):
         if value.startswith("jdbc:"):
             value = value[5:]
         if value.startswith("postgresql://"):
-            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+            value = value.replace("postgresql://", "postgresql+psycopg://", 1)
         if value.startswith("postgres://"):
-            return value.replace("postgres://", "postgresql+psycopg://", 1)
+            value = value.replace("postgres://", "postgresql+psycopg://", 1)
+        if value.startswith("postgresql+psycopg://") and "sslmode=" not in value:
+            value += "?sslmode=require"
         return value
 
     def resolved_jwt_secret(self) -> str:
@@ -295,14 +300,32 @@ def profile_response(profile: BusinessProfile) -> dict[str, Any]:
     return {"id": profile.id, "businessName": profile.business_name, "industry": profile.industry, "businessStage": profile.business_stage, "description": profile.description, "location": profile.location, "fundingNeeded": profile.funding_needed, "intendedUseOfFunds": profile.intended_use_of_funds, "createdAt": profile.created_at, "updatedAt": profile.updated_at}
 
 
+async def grok_assessment(request: AnalysisRequest, deterministic: dict[str, Any]) -> Optional[dict[str, Any]]:
+    api_key = os.getenv("XAI_API_KEY")
+    if not api_key:
+        return None
+    prompt = "Return JSON with riskLevel, recommendation, keyRisks, assumptions, narrative for this business proposal: " + json.dumps({"startupCosts": str(request.startupCosts), "monthlyRevenue": str(request.monthlyRevenue), "monthlyExpenses": str(request.monthlyExpenses), "monthlyGrowthPercent": str(request.monthlyGrowthPercent), "deterministic": deterministic})
+    try:
+        async with httpx.AsyncClient(timeout=35) as client:
+            response = await client.post("https://api.x.ai/v1/responses", headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, json={"model": os.getenv("XAI_MODEL", "grok-4"), "input": prompt, "max_output_tokens": 700})
+            response.raise_for_status()
+            data = response.json()
+        text = "".join(content.get("text", "") for item in data.get("output", []) for content in item.get("content", [])).strip()
+        return json.loads(text.replace("```json", "").replace("```", "").strip())
+    except Exception:
+        return None
+
 @app.post("/api/entrepreneur/business-analysis")
-def analyse(request: AnalysisRequest, user: User = Depends(require_role("ENTREPRENEUR"))):
+async def analyse(request: AnalysisRequest, user: User = Depends(require_role("ENTREPRENEUR"))):
     if min(request.startupCosts, request.monthlyRevenue, request.monthlyExpenses) < 0: raise HTTPException(status_code=400, detail="Financial values cannot be negative.")
     profit = request.monthlyRevenue - request.monthlyExpenses
     break_even = int((request.startupCosts / profit).to_integral_value(rounding="ROUND_CEILING")) if profit > 0 else None
     outlook = "Potentially profitable" if profit > 0 else "Break-even only" if profit == 0 else "Needs improvement"
     summary = "Your projected revenue is higher than your projected monthly expenses." if profit > 0 else "Your current projection covers operating costs but does not recover startup costs." if profit == 0 else "Your projected monthly expenses are higher than your projected revenue."
-    return {"outlook": outlook, "summary": summary, "estimatedBreakEvenMonths": break_even, "estimatedMonthlyProfit": profit, "estimatedAnnualProfit": profit * 12, "monthlyExpenses": request.monthlyExpenses, "confidence": "Medium" if profit > 0 else "Low", "disclaimer": "This is an advisory estimate based only on the figures you entered. It is not a funding or profit guarantee."}
+    result = {"outlook": outlook, "summary": summary, "estimatedBreakEvenMonths": break_even, "estimatedMonthlyProfit": profit, "estimatedAnnualProfit": profit * 12, "monthlyExpenses": request.monthlyExpenses, "confidence": "Medium" if profit > 0 else "Low", "disclaimer": "This is an advisory estimate based only on the figures you entered. It is not a funding or profit guarantee."}
+    result["aiAssessment"] = await grok_assessment(request, result)
+    result["aiProvider"] = "grok" if result["aiAssessment"] else "deterministic-fallback"
+    return result
 
 
 @app.get("/api/funder/programmes/active")
@@ -382,3 +405,4 @@ def my_programmes(user: User = Depends(require_role("FUNDER")), db: Session = De
 @app.get("/api/test/protected")
 def protected_test(user: User = Depends(current_user)):
     return f"Authenticated successfully as: {user.email}"
+

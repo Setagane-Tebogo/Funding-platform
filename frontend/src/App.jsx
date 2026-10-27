@@ -4,6 +4,7 @@ import AuthPage from "./AuthPage";
 import BusinessProfile from "./BusinessProfile";
 import FindFunding from "./FindFunding";
 import MyApplications from "./MyApplications";
+import ChatPanel from "./ChatPanel";
 import FunderDashboard from "./FunderDashboard";
 import AdminDashboard from "./AdminDashboard";
 
@@ -12,6 +13,7 @@ const menuItems = [
   { label: "Business Profile", icon: "◈" },
   { label: "Find Funding", icon: "⌕" },
   { label: "My Applications", icon: "▤" },
+  { label: "Messages", icon: "✉" },
 ];
 
 function pageHash(page) {
@@ -84,6 +86,7 @@ function App() {
     if (activePage === "Business Profile") return <BusinessProfile />;
     if (activePage === "Find Funding") return <FindFunding />;
     if (activePage === "My Applications") return <MyApplications />;
+    if (activePage === "Messages") return <ChatPanel />;
 
     return (
       <div className="dashboard-page">
@@ -141,5 +144,6 @@ function RolePage({ user, onLogout, children }) {
 }
 
 export default App;
+
 
 

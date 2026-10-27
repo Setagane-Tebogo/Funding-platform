@@ -272,7 +272,7 @@ def programme_response(programme: FundingProgramme, organisation_name: Optional[
 
 
 app = FastAPI(title="FundBridge API", version="2.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, "http://localhost:5173", "http://localhost:5174"], allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, "https://funding-platform-snowy.vercel.app", "http://localhost:5173", "http://localhost:5174"], allow_origin_regex=r"https://.*\.vercel\.app$", allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
 
 
 @app.on_event("startup")

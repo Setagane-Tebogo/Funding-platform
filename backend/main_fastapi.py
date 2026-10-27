@@ -14,7 +14,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, create_engine, select
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, create_engine, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 
@@ -86,6 +86,7 @@ class FunderOrganisation(Base):
     phone: Mapped[Optional[str]] = mapped_column(String(100))
     location: Mapped[Optional[str]] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    approval_status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False)
 
 
 class FundingProgramme(Base):
@@ -120,7 +121,13 @@ class RegisterRequest(BaseModel):
     name: str
     email: str
     password: str = Field(min_length=8)
-    role: Optional[str] = None
+    accountType: str = "ENTREPRENEUR"
+    organisationName: Optional[str] = None
+    organisationType: Optional[str] = None
+    description: Optional[str] = None
+    website: Optional[str] = None
+    phone: Optional[str] = None
+    location: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -236,6 +243,8 @@ app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, "http:/
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE funder_organisations ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) DEFAULT 'PENDING'"))
     admin_email = os.getenv("ADMIN_EMAIL")
     admin_password = os.getenv("ADMIN_PASSWORD")
     if admin_email and admin_password:
@@ -263,7 +272,7 @@ def register(request: RegisterRequest, db: Session = Depends(db_session)):
     account_type = request.accountType.strip().upper()
     if account_type not in {"ENTREPRENEUR", "ORGANISATION"}:
         raise HTTPException(status_code=400, detail="Choose entrepreneur or organisation registration")
-    role = "ENTREPRENEUR" if account_type == "ENTREPRENEUR" else "PENDING_FUNDER"
+    role = "ENTREPRENEUR" if account_type == "ENTREPRENEUR" else "FUNDER"
     if account_type == "ORGANISATION" and not request.organisationName:
         raise HTTPException(status_code=400, detail="Organisation name is required")
     user = User(name=request.name.strip(), email=email, password=hash_password(request.password), role=role)
@@ -283,10 +292,11 @@ def login(request: LoginRequest, db: Session = Depends(db_session)):
     user = db.scalar(select(User).where(User.email == request.email.strip().lower()))
     if not user or not verify_password(request.password, user.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    if user.role == "PENDING_FUNDER":
-        raise HTTPException(status_code=403, detail="Organisation account is waiting for administrator approval")
-    if user.role == "REJECTED_FUNDER":
-        raise HTTPException(status_code=403, detail="Organisation registration was not approved")
+    if user.role == "FUNDER":
+        organisation = db.scalar(select(FunderOrganisation).where(FunderOrganisation.user_id == user.id))
+        if organisation and organisation.approval_status != "APPROVED":
+            detail = "Organisation registration was not approved" if organisation.approval_status == "REJECTED" else "Organisation account is waiting for administrator approval"
+            raise HTTPException(status_code=403, detail=detail)
     return {"token": make_token(user), **user_response(user)}
 
 @app.get("/api/entrepreneur/dashboard")
@@ -432,7 +442,7 @@ def protected_test(user: User = Depends(current_user)):
 
 @app.get("/api/admin/organisations/pending")
 def pending_organisations(user: User = Depends(require_role("ADMIN")), db: Session = Depends(db_session)):
-    rows = db.scalars(select(FunderOrganisation).join(User, FunderOrganisation.user_id == User.id).where(User.role == "PENDING_FUNDER").order_by(FunderOrganisation.created_at.desc())).all()
+    rows = db.scalars(select(FunderOrganisation).join(User, FunderOrganisation.user_id == User.id).where(FunderOrganisation.approval_status == "PENDING").order_by(FunderOrganisation.created_at.desc())).all()
     result = []
     for row in rows:
         applicant = db.get(User, row.user_id)
@@ -443,9 +453,10 @@ def pending_organisations(user: User = Depends(require_role("ADMIN")), db: Sessi
 @app.post("/api/admin/organisations/{user_id}/approve")
 def approve_organisation(user_id: int, user: User = Depends(require_role("ADMIN")), db: Session = Depends(db_session)):
     applicant = db.get(User, user_id)
-    if not applicant or applicant.role != "PENDING_FUNDER":
+    organisation = db.scalar(select(FunderOrganisation).where(FunderOrganisation.user_id == user_id))
+    if not applicant or applicant.role != "FUNDER" or not organisation or organisation.approval_status != "PENDING":
         raise HTTPException(status_code=404, detail="Pending organisation not found")
-    applicant.role = "FUNDER"
+    organisation.approval_status = "APPROVED"
     db.commit()
     return {"message": "Organisation approved", "user": user_response(applicant)}
 
@@ -453,8 +464,9 @@ def approve_organisation(user_id: int, user: User = Depends(require_role("ADMIN"
 @app.post("/api/admin/organisations/{user_id}/reject")
 def reject_organisation(user_id: int, user: User = Depends(require_role("ADMIN")), db: Session = Depends(db_session)):
     applicant = db.get(User, user_id)
-    if not applicant or applicant.role != "PENDING_FUNDER":
+    organisation = db.scalar(select(FunderOrganisation).where(FunderOrganisation.user_id == user_id))
+    if not applicant or applicant.role != "FUNDER" or not organisation or organisation.approval_status != "PENDING":
         raise HTTPException(status_code=404, detail="Pending organisation not found")
-    applicant.role = "REJECTED_FUNDER"
+    organisation.approval_status = "REJECTED"
     db.commit()
     return {"message": "Organisation rejected"}

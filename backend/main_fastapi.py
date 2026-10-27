@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+import logging
 import json
 import httpx
 import smtplib
 import secrets
 from email.message import EmailMessage
+
+email_logger = logging.getLogger('fundbridge.email')
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any, Optional
@@ -266,7 +269,9 @@ def send_email(to_email: str, subject: str, body: str) -> None:
     username = os.getenv("SMTP_USERNAME")
     password = os.getenv("SMTP_PASSWORD")
     sender = os.getenv("MAIL_FROM_EMAIL", username or "")
-    if not username or not password or not sender: return
+    if not username or not password or not sender:
+        email_logger.error("SMTP email not configured. Required variables: SMTP_USERNAME, SMTP_PASSWORD, MAIL_FROM_EMAIL")
+        return
     message = EmailMessage()
     message["From"] = os.getenv("MAIL_FROM_NAME", "FundBridge") + " <" + sender + ">"
     message["To"] = to_email
@@ -277,7 +282,8 @@ def send_email(to_email: str, subject: str, body: str) -> None:
             smtp.starttls()
             smtp.login(username, password)
             smtp.send_message(message)
-    except Exception:
+    except Exception as exc:
+        email_logger.error("Brevo SMTP send failed: %s", exc)
         return
 
 

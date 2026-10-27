@@ -397,7 +397,7 @@ def register(request: RegisterRequest, background_tasks: BackgroundTasks, db: Se
     background_tasks.add_task(send_email, email, "Verify your FundBridge email", f"Your FundBridge verification code is {verification_code}. It expires in 15 minutes.")
     response = user_response(user)
     response["verificationRequired"] = True
-    response["message"] = "Your account was created. Check your email for the six-digit verification code before logging in.")
+    response["message"] = "Your account was created. Check your email for the six-digit verification code before logging in."
     if account_type == "ORGANISATION":
         response["message"] = "Organisation registration submitted. Check your email for the verification code, then wait for administrator approval."
         response["pendingApproval"] = True
@@ -831,3 +831,4 @@ def delete_user(user_id: int, user: User = Depends(require_role("ADMIN")), db: S
     db.delete(target)
     db.commit()
     return {"message": "User and all associated data deleted", "userId": user_id}
+

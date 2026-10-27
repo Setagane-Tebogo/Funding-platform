@@ -12,6 +12,7 @@ export default function AuthPage({ onLogin }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
   const [accountType, setAccountType] = useState("ENTREPRENEUR");
   const [organisationName, setOrganisationName] = useState("");
   const [organisationType, setOrganisationType] = useState("");
@@ -28,6 +29,7 @@ export default function AuthPage({ onLogin }) {
     setConfirmPassword("");
 
     setOtpSent(false);
+    setVerificationSent(false);
   }
 
   async function handleSubmit(event) {
@@ -35,6 +37,19 @@ export default function AuthPage({ onLogin }) {
     setError("");
     setSuccess("");
 
+    if (mode === "register" && verificationSent) {
+      setLoading(true);
+      try {
+        const response = await fetch(`${API_URL}/verify-email`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: email.trim(), code: otp }) });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(data?.detail || "Could not verify your email.");
+        setVerificationSent(false);
+        setOtp("");
+        setMode("login");
+        setSuccess(data.message || "Email verified. You can now log in.");
+      } catch (err) { setError(err.message); } finally { setLoading(false); }
+      return;
+    }
     if (mode === "forgot") {
       setLoading(true);
       try {
@@ -96,12 +111,9 @@ export default function AuthPage({ onLogin }) {
       }
 
       if (isRegistering) {
-        setSuccess(data?.pendingApproval ? "Registration submitted. Please wait for an administrator to approve your organisation before you try to log in." : "Account created successfully. You can now log in.");
-        setMode("login");
-        setPassword("");
-        setConfirmPassword("");
-
-    setOtpSent(false);
+        setVerificationSent(true);
+        setOtp("");
+        setSuccess(data?.message || "Check your email for the verification code.");
         return;
       }
 
@@ -264,6 +276,7 @@ export default function AuthPage({ onLogin }) {
               />
             </label>
             {mode === "forgot" && otpSent && <label>OTP code<input value={otp} onChange={(event) => setOtp(event.target.value)} inputMode="numeric" maxLength={6} required /></label>}
+            {mode === "register" && verificationSent && <label>Verification code<input value={otp} onChange={(event) => setOtp(event.target.value)} inputMode="numeric" maxLength={6} required /></label>}
 
             {(mode !== "forgot" || otpSent) && <label>
               Password
@@ -329,6 +342,8 @@ export default function AuthPage({ onLogin }) {
     </main>
   );
 }
+
+
 
 
 

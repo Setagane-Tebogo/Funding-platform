@@ -69,6 +69,17 @@ class PasswordReset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+
+
+class EmailVerification(Base):
+    __tablename__ = "email_verifications"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
 class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -181,6 +192,12 @@ class ResetPasswordRequest(BaseModel):
     otp: str = Field(min_length=6, max_length=6)
     newPassword: str = Field(min_length=8)
 
+
+
+
+class VerifyEmailRequest(BaseModel):
+    email: str
+    code: str = Field(min_length=6, max_length=6)
 
 class ProfileRequest(BaseModel):
     businessName: str
@@ -374,9 +391,15 @@ def register(request: RegisterRequest, background_tasks: BackgroundTasks, db: Se
     if account_type == "ORGANISATION":
         db.add(FunderOrganisation(user_id=user.id, organisation_name=request.organisationName.strip(), organisation_type=request.organisationType, description=request.description, website=request.website, phone=request.phone, location=request.location))
     db.commit(); db.refresh(user)
+    verification_code = f"{secrets.randbelow(1000000):06d}"
+    db.add(EmailVerification(email=email, code_hash=hash_password(verification_code), expires_at=datetime.utcnow() + timedelta(minutes=15)))
+    db.commit()
+    background_tasks.add_task(send_email, email, "Verify your FundBridge email", f"Your FundBridge verification code is {verification_code}. It expires in 15 minutes.")
     response = user_response(user)
+    response["verificationRequired"] = True
+    response["message"] = "Your account was created. Check your email for the six-digit verification code before logging in.")
     if account_type == "ORGANISATION":
-        response["message"] = "Organisation registration submitted. An administrator must approve it before login."
+        response["message"] = "Organisation registration submitted. Check your email for the verification code, then wait for administrator approval."
         response["pendingApproval"] = True
         admin_email = os.getenv("ADMIN_EMAIL")
         if admin_email:
@@ -384,11 +407,25 @@ def register(request: RegisterRequest, background_tasks: BackgroundTasks, db: Se
     return response
 
 
+
+@app.post("/api/auth/verify-email")
+def verify_email(request: VerifyEmailRequest, db: Session = Depends(db_session)):
+    email = request.email.strip().lower()
+    verification = db.scalar(select(EmailVerification).where(EmailVerification.email == email, EmailVerification.used.is_(False)).order_by(EmailVerification.created_at.desc()))
+    if not verification or verification.expires_at < datetime.utcnow() or not verify_password(request.code, verification.code_hash):
+        raise HTTPException(status_code=400, detail="Invalid or expired email verification code")
+    verification.used = True
+    db.commit()
+    return {"message": "Email verified successfully. You can now log in."}
+
 @app.post("/api/auth/login")
 def login(request: LoginRequest, db: Session = Depends(db_session)):
     user = db.scalar(select(User).where(User.email == request.email.strip().lower()))
     if not user or not verify_password(request.password, user.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    pending_verification = db.scalar(select(EmailVerification).where(EmailVerification.email == user.email, EmailVerification.used.is_(False)).order_by(EmailVerification.created_at.desc()))
+    if pending_verification:
+        raise HTTPException(status_code=403, detail="Please verify your email address before logging in")
     if user.role == "FUNDER":
         organisation = db.scalar(select(FunderOrganisation).where(FunderOrganisation.user_id == user.id))
         if organisation and organisation.approval_status != "APPROVED":
@@ -764,4 +801,34 @@ def reject_organisation(user_id: int, user: User = Depends(require_role("ADMIN")
     db.commit()
     return {"message": "Organisation rejected"}
 
+
+
+
+
+
+
+
+@app.delete("/api/admin/users/{user_id}")
+def delete_user(user_id: int, user: User = Depends(require_role("ADMIN")), db: Session = Depends(db_session)):
+    if user.id == user_id:
+        raise HTTPException(status_code=400, detail="The administrator account cannot delete itself")
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    organisation = db.scalar(select(FunderOrganisation).where(FunderOrganisation.user_id == user_id))
+    programme_ids = [item.id for item in db.scalars(select(FundingProgramme).where(FundingProgramme.organisation_id == organisation.id)).all()] if organisation else []
+    applications = db.scalars(select(FundingApplication).where((FundingApplication.entrepreneur_id == user_id) | FundingApplication.programme_id.in_(programme_ids))).all()
+    conversations = db.scalars(select(ChatConversation).where((ChatConversation.entrepreneur_id == user_id) | (ChatConversation.funder_id == user_id))).all()
+    conversation_ids = [item.id for item in conversations]
+    for item in db.scalars(select(ChatMessage).where(ChatMessage.conversation_id.in_(conversation_ids))).all(): db.delete(item)
+    for item in conversations: db.delete(item)
+    for item in applications: db.delete(item)
+    for item in db.scalars(select(BusinessProfile).where(BusinessProfile.user_id == user_id)).all(): db.delete(item)
+    for item in db.scalars(select(PasswordReset).where(PasswordReset.email == target.email)).all(): db.delete(item)
+    for item in db.scalars(select(EmailVerification).where(EmailVerification.email == target.email)).all(): db.delete(item)
+    for item in db.scalars(select(FundingProgramme).where(FundingProgramme.id.in_(programme_ids))).all(): db.delete(item)
+    if organisation: db.delete(organisation)
+    db.delete(target)
+    db.commit()
+    return {"message": "User and all associated data deleted", "userId": user_id}
 

@@ -398,14 +398,15 @@ def login(request: LoginRequest, db: Session = Depends(db_session)):
 
 @app.post("/api/auth/forgot-password")
 def forgot_password(request: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(db_session)):
-    email = request.email.strip().lower(); user = db.scalar(select(User).where(User.email == email))
-    if user:
-        otp = f"{secrets.randbelow(1000000):06d}"
-        db.add(PasswordReset(email=email, otp_hash=hash_password(otp), expires_at=datetime.utcnow() + timedelta(minutes=10)))
-        db.commit()
-        background_tasks.add_task(send_email, email, "Your FundBridge password reset code", f"Your one-time password is {otp}. It expires in 10 minutes.")
-    return {"message": "If an account exists for that email, a reset code has been sent."}
-
+    email = request.email.strip().lower()
+    user = db.scalar(select(User).where(User.email == email))
+    if not user:
+        raise HTTPException(status_code=404, detail="No FundBridge account was found with that email address.")
+    otp = f"{secrets.randbelow(1000000):06d}"
+    db.add(PasswordReset(email=email, otp_hash=hash_password(otp), expires_at=datetime.utcnow() + timedelta(minutes=10)))
+    db.commit()
+    background_tasks.add_task(send_email, email, "Your FundBridge password reset code", f"Your one-time password is {otp}. It expires in 10 minutes.")
+    return {"message": "A password reset code has been sent to your email address."}
 
 @app.post("/api/auth/reset-password")
 def reset_password(request: ResetPasswordRequest, db: Session = Depends(db_session)):
@@ -762,3 +763,5 @@ def reject_organisation(user_id: int, user: User = Depends(require_role("ADMIN")
     organisation.approval_status = "REJECTED"
     db.commit()
     return {"message": "Organisation rejected"}
+
+

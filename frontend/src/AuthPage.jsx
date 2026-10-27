@@ -10,6 +10,8 @@ export default function AuthPage({ onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [otp, setOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
   const [accountType, setAccountType] = useState("ENTREPRENEUR");
   const [organisationName, setOrganisationName] = useState("");
   const [organisationType, setOrganisationType] = useState("");
@@ -24,12 +26,33 @@ export default function AuthPage({ onLogin }) {
     setSuccess("");
     setPassword("");
     setConfirmPassword("");
+
+    setOtpSent(false);
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
     setError("");
     setSuccess("");
+
+    if (mode === "forgot") {
+      setLoading(true);
+      try {
+        const endpoint = otpSent ? "reset-password" : "forgot-password";
+        const body = otpSent ? { email: email.trim(), otp, newPassword: password } : { email: email.trim() };
+        const response = await fetch(`${API_URL}/${endpoint}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(data?.detail || "Could not process password reset.");
+        if (!otpSent) {
+          setOtpSent(true);
+          setSuccess(data.message);
+        } else {
+          changeMode("login");
+          setSuccess(data.message || "Password reset successfully. You can now log in.");
+        }
+      } catch (err) { setError(err.message); } finally { setLoading(false); }
+      return;
+    }
 
     if (mode === "register" && password !== confirmPassword) {
       setError("Your passwords do not match.");
@@ -77,6 +100,8 @@ export default function AuthPage({ onLogin }) {
         setMode("login");
         setPassword("");
         setConfirmPassword("");
+
+    setOtpSent(false);
         return;
       }
 
@@ -155,12 +180,13 @@ export default function AuthPage({ onLogin }) {
           </p>
 
           <h2>
-            {mode === "login" ? "Welcome back" : "Create your account"}
+            {mode === "login" ? "Welcome back" : mode === "forgot" ? "Reset your password" : "Create your account"}
           </h2>
 
           <p className="auth-intro">
             {mode === "login"
               ? "Log in to continue to your FundBridge workspace."
+              : mode === "forgot" ? "Recover access to your FundBridge workspace."
               : "Create an account to start your funding journey."}
           </p>
 
@@ -237,21 +263,20 @@ export default function AuthPage({ onLogin }) {
                 required
               />
             </label>
+            {mode === "forgot" && otpSent && <label>OTP code<input value={otp} onChange={(event) => setOtp(event.target.value)} inputMode="numeric" maxLength={6} required /></label>}
 
-            <label>
+            {(mode !== "forgot" || otpSent) && <label>
               Password
               <input
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="Enter your password"
-                autoComplete={
-                  mode === "login" ? "current-password" : "new-password"
-                }
+                placeholder={mode === "forgot" ? "Choose a new password" : "Enter your password"}
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
                 minLength={8}
                 required
               />
-            </label>
+            </label>}
 
             {mode === "register" && (
               <label>
@@ -279,14 +304,17 @@ export default function AuthPage({ onLogin }) {
                 ? "Please wait..."
                 : mode === "login"
                   ? "Log in to FundBridge →"
+                  : mode === "forgot" ? (otpSent ? "Reset password →" : "Email me a reset code →")
                   : "Create entrepreneur account →"}
             </button>
           </form>
 
+          {mode === "login" && <button type="button" className="forgot-link" onClick={() => changeMode("forgot")}>Forgot password?</button>}
+          {mode === "forgot" && <p className="auth-reset-hint">{otpSent ? "Enter the six-digit code from your email and choose a new password." : "We will email you a six-digit reset code."}</p>}
           <p className="auth-switch">
             {mode === "login"
               ? "New to FundBridge?"
-              : "Already have an account?"}{" "}
+              : mode === "forgot" ? "Remembered your password?" : "Already have an account?"}{" "}
             <button
               type="button"
               onClick={() =>
@@ -295,11 +323,20 @@ export default function AuthPage({ onLogin }) {
             >
               {mode === "login" ? "Create an account" : "Log in"}
             </button>
-          </p>        </div>
+          </p>
+        </div>
       </section>
     </main>
   );
 }
+
+
+
+
+
+
+
+
 
 
 

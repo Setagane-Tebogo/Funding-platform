@@ -3,12 +3,15 @@ from __future__ import annotations
 import os
 import json
 import httpx
+import smtplib
+import secrets
+from email.message import EmailMessage
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any, Optional
 
 import bcrypt
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -24,6 +27,8 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:5173"
     xai_model: str = "grok-4"
     environment: str = "development"
+    smtp_host: str = "smtp-relay.brevo.com"
+    smtp_port: int = 587
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     def resolved_database_url(self) -> str:
@@ -49,6 +54,16 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 class Base(DeclarativeBase):
     pass
+
+
+class PasswordReset(Base):
+    __tablename__ = "password_resets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    otp_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class User(Base):
@@ -155,6 +170,15 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    otp: str = Field(min_length=6, max_length=6)
+    newPassword: str = Field(min_length=8)
+
+
 class ProfileRequest(BaseModel):
     businessName: str
     industry: str
@@ -238,6 +262,25 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 
+def send_email(to_email: str, subject: str, body: str) -> None:
+    username = os.getenv("SMTP_USERNAME")
+    password = os.getenv("SMTP_PASSWORD")
+    sender = os.getenv("MAIL_FROM_EMAIL", username or "")
+    if not username or not password or not sender: return
+    message = EmailMessage()
+    message["From"] = os.getenv("MAIL_FROM_NAME", "FundBridge") + " <" + sender + ">"
+    message["To"] = to_email
+    message["Subject"] = subject
+    message.set_content(body)
+    try:
+        with smtplib.SMTP(os.getenv("SMTP_HOST", settings.smtp_host), int(os.getenv("SMTP_PORT", str(settings.smtp_port))), timeout=15) as smtp:
+            smtp.starttls()
+            smtp.login(username, password)
+            smtp.send_message(message)
+    except Exception:
+        return
+
+
 def make_token(user: User) -> str:
     payload = {"sub": user.email, "role": user.role, "exp": datetime.now(timezone.utc) + timedelta(days=1)}
     return jwt.encode(payload, settings.resolved_jwt_secret(), algorithm="HS256")
@@ -306,7 +349,7 @@ def health():
 
 
 @app.post("/api/auth/register")
-def register(request: RegisterRequest, db: Session = Depends(db_session)):
+def register(request: RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(db_session)):
     email = request.email.strip().lower()
     if len(request.name.strip()) < 2:
         raise HTTPException(status_code=422, detail="Name must contain at least 2 characters")
@@ -329,6 +372,9 @@ def register(request: RegisterRequest, db: Session = Depends(db_session)):
     if account_type == "ORGANISATION":
         response["message"] = "Organisation registration submitted. An administrator must approve it before login."
         response["pendingApproval"] = True
+        admin_email = os.getenv("ADMIN_EMAIL")
+        if admin_email:
+            background_tasks.add_task(send_email, admin_email, "New FundBridge organisation registration", f"Organisation {request.organisationName} registered with email {email} and is waiting for approval.")
     return response
 
 
@@ -343,6 +389,27 @@ def login(request: LoginRequest, db: Session = Depends(db_session)):
             detail = "Organisation registration was not approved" if organisation.approval_status == "REJECTED" else "Organisation account is waiting for administrator approval"
             raise HTTPException(status_code=403, detail=detail)
     return {"token": make_token(user), **user_response(user)}
+
+@app.post("/api/auth/forgot-password")
+def forgot_password(request: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(db_session)):
+    email = request.email.strip().lower(); user = db.scalar(select(User).where(User.email == email))
+    if user:
+        otp = f"{secrets.randbelow(1000000):06d}"
+        db.add(PasswordReset(email=email, otp_hash=hash_password(otp), expires_at=datetime.utcnow() + timedelta(minutes=10)))
+        db.commit()
+        background_tasks.add_task(send_email, email, "Your FundBridge password reset code", f"Your one-time password is {otp}. It expires in 10 minutes.")
+    return {"message": "If an account exists for that email, a reset code has been sent."}
+
+
+@app.post("/api/auth/reset-password")
+def reset_password(request: ResetPasswordRequest, db: Session = Depends(db_session)):
+    email = request.email.strip().lower(); reset = db.scalar(select(PasswordReset).where(PasswordReset.email == email, PasswordReset.used.is_(False)).order_by(PasswordReset.created_at.desc()))
+    if not reset or reset.expires_at < datetime.utcnow() or not verify_password(request.otp, reset.otp_hash): raise HTTPException(status_code=400, detail="Invalid or expired reset code")
+    user = db.scalar(select(User).where(User.email == email))
+    if not user: raise HTTPException(status_code=400, detail="Invalid or expired reset code")
+    user.password = hash_password(request.newPassword); reset.used = True; db.commit()
+    return {"message": "Password reset successfully. You can now log in."}
+
 
 @app.get("/api/entrepreneur/dashboard")
 def entrepreneur_dashboard(user: User = Depends(require_role("ENTREPRENEUR"))):
@@ -528,7 +595,10 @@ def can_access_conversation(row: ChatConversation, user: User) -> bool:
 @app.get("/api/chat/conversations")
 def chat_conversations(user: User = Depends(current_user), db: Session = Depends(db_session)):
     rows = db.scalars(select(ChatConversation).where((ChatConversation.entrepreneur_id == user.id) | (ChatConversation.funder_id == user.id)).order_by(ChatConversation.updated_at.desc())).all()
-    return [conversation_response(row, user.id, db) for row in rows]
+    unique = {}
+    for row in rows:
+        unique.setdefault((row.entrepreneur_id, row.funder_id), row)
+    return [conversation_response(row, user.id, db) for row in unique.values()]
 
 
 @app.post("/api/chat/conversations", status_code=201)
@@ -547,9 +617,14 @@ def create_conversation(request: ConversationRequest, user: User = Depends(curre
     has_profile = db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == entrepreneur_id))
     if not connected and not has_profile:
         raise HTTPException(status_code=403, detail="Conversation is only available after a proposal or application connection")
-    row = db.scalar(select(ChatConversation).where(ChatConversation.entrepreneur_id == entrepreneur_id, ChatConversation.funder_id == funder_id, ChatConversation.programme_id == request.programmeId))
+    row = db.scalar(select(ChatConversation).where(ChatConversation.entrepreneur_id == entrepreneur_id, ChatConversation.funder_id == funder_id).order_by(ChatConversation.updated_at.desc()))
     if not row:
-        row = ChatConversation(entrepreneur_id=entrepreneur_id, funder_id=funder_id, programme_id=request.programmeId); db.add(row); db.commit(); db.refresh(row)
+        row = ChatConversation(entrepreneur_id=entrepreneur_id, funder_id=funder_id, programme_id=request.programmeId)
+        db.add(row)
+    elif request.programmeId:
+        row.programme_id = request.programmeId
+    row.updated_at = datetime.utcnow()
+    db.commit(); db.refresh(row)
     return conversation_response(row, user.id, db)
 
 
@@ -562,10 +637,18 @@ def chat_messages(conversation_id: int, user: User = Depends(current_user), db: 
 
 
 @app.post("/api/chat/conversations/{conversation_id}/messages", status_code=201)
-def send_chat_message(conversation_id: int, request: MessageRequest, user: User = Depends(current_user), db: Session = Depends(db_session)):
+def send_chat_message(conversation_id: int, request: MessageRequest, background_tasks: BackgroundTasks, user: User = Depends(current_user), db: Session = Depends(db_session)):
     conversation = db.get(ChatConversation, conversation_id)
     if not conversation or not can_access_conversation(conversation, user): raise HTTPException(status_code=404, detail="Conversation not found")
+    first_message = db.scalar(select(ChatMessage).where(ChatMessage.conversation_id == conversation_id)) is None
     row = ChatMessage(conversation_id=conversation_id, sender_id=user.id, content=request.content.strip()); db.add(row); conversation.updated_at = datetime.utcnow(); db.commit(); db.refresh(row)
+    if first_message:
+        recipient_id = conversation.funder_id if user.id == conversation.entrepreneur_id else conversation.entrepreneur_id
+        recipient = db.get(User, recipient_id)
+        programme = db.get(FundingProgramme, conversation.programme_id) if conversation.programme_id else None
+        if recipient:
+            context = programme.programme_name if programme else "a FundBridge conversation"
+            background_tasks.add_task(send_email, recipient.email, "New FundBridge message", f"{user.name} sent you a new message in {context}. Log in to reply.")
     return {"id": row.id, "senderId": row.sender_id, "content": row.content, "createdAt": row.created_at}
 
 

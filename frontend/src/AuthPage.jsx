@@ -65,14 +65,15 @@ export default function AuthPage({ onLogin }) {
         throw new Error(
           typeof data === "string"
             ? data
-            : data?.message ||
+            : data?.detail ||
+              data?.message ||
               data?.error ||
               `Request failed (HTTP ${response.status}).`
         );
       }
 
       if (isRegistering) {
-        setSuccess("Account created successfully. You can now log in.");
+        setSuccess(data?.pendingApproval ? "Registration submitted. Please wait for an administrator to approve your organisation before you try to log in." : "Account created successfully. You can now log in.");
         setMode("login");
         setPassword("");
         setConfirmPassword("");
@@ -299,3 +300,5 @@ export default function AuthPage({ onLogin }) {
     </main>
   );
 }
+
+

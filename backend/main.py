@@ -156,6 +156,9 @@ class ApplicationRequest(BaseModel):
     programmeId: int
     proposal: str
 
+class ApplicationStatusRequest(BaseModel):
+    status: str
+
 
 class OrganisationRequest(BaseModel):
     organisationName: str
@@ -399,6 +402,34 @@ def submit_application(request: ApplicationRequest, user: User = Depends(require
     return {"id": row.id, "programmeName": programme.programme_name, "proposal": row.proposal, "status": row.status, "createdAt": row.created_at}
 
 
+def application_response(row: FundingApplication, programme: Optional[FundingProgramme], entrepreneur: Optional[User], organisation: Optional[FunderOrganisation] = None) -> dict[str, Any]:
+    return {"id": row.id, "programmeId": row.programme_id, "programmeName": programme.programme_name if programme else "Unknown programme", "organisationName": organisation.organisation_name if organisation else None, "entrepreneurId": entrepreneur.id if entrepreneur else row.entrepreneur_id, "entrepreneurName": entrepreneur.name if entrepreneur else "Unknown entrepreneur", "entrepreneurEmail": entrepreneur.email if entrepreneur else None, "proposal": row.proposal, "status": row.status, "createdAt": row.created_at}
+
+
+@app.get("/api/funder/entrepreneur-profiles")
+def entrepreneur_profiles_for_funders(user: User = Depends(require_role("FUNDER")), db: Session = Depends(db_session)):
+    profiles = db.scalars(select(BusinessProfile).join(User, BusinessProfile.user_id == User.id).order_by(BusinessProfile.updated_at.desc())).all()
+    return [{**profile_response(profile), "entrepreneurId": profile.user_id, "entrepreneurName": db.get(User, profile.user_id).name, "entrepreneurEmail": db.get(User, profile.user_id).email} for profile in profiles]
+
+
+@app.get("/api/funder/applications")
+def funder_applications(user: User = Depends(require_role("FUNDER")), db: Session = Depends(db_session)):
+    organisation = db.scalar(select(FunderOrganisation).where(FunderOrganisation.user_id == user.id))
+    if not organisation: raise HTTPException(status_code=404, detail="Organisation profile not found")
+    rows = db.scalars(select(FundingApplication).join(FundingProgramme, FundingApplication.programme_id == FundingProgramme.id).where(FundingProgramme.organisation_id == organisation.id).order_by(FundingApplication.created_at.desc())).all()
+    return [application_response(row, db.get(FundingProgramme, row.programme_id), db.get(User, row.entrepreneur_id), organisation) for row in rows]
+
+
+@app.patch("/api/funder/applications/{application_id}")
+def update_application_status(application_id: int, request: ApplicationStatusRequest, user: User = Depends(require_role("FUNDER")), db: Session = Depends(db_session)):
+    organisation = db.scalar(select(FunderOrganisation).where(FunderOrganisation.user_id == user.id)); row = db.get(FundingApplication, application_id); programme = db.get(FundingProgramme, row.programme_id) if row else None
+    new_status = request.status.strip().upper()
+    if not row or not programme or not organisation or programme.organisation_id != organisation.id: raise HTTPException(status_code=404, detail="Application not found")
+    if new_status not in {"SUBMITTED", "REVIEWING", "ACCEPTED", "DECLINED"}: raise HTTPException(status_code=400, detail="Invalid application status")
+    row.status = new_status; db.commit()
+    return application_response(row, programme, db.get(User, row.entrepreneur_id), organisation)
+
+
 @app.post("/api/funder/organisation")
 def create_organisation(request: OrganisationRequest, user: User = Depends(require_role("FUNDER")), db: Session = Depends(db_session)):
     if db.scalar(select(FunderOrganisation).where(FunderOrganisation.user_id == user.id)): raise HTTPException(status_code=400, detail="Organisation profile already exists")
@@ -438,6 +469,21 @@ def my_programmes(user: User = Depends(require_role("FUNDER")), db: Session = De
 @app.get("/api/test/protected")
 def protected_test(user: User = Depends(current_user)):
     return f"Authenticated successfully as: {user.email}"
+
+
+@app.get("/api/admin/users")
+def admin_users(user: User = Depends(require_role("ADMIN")), db: Session = Depends(db_session)):
+    users = db.scalars(select(User).order_by(User.created_at.desc())).all()
+    return [{"id": item.id, "name": item.name, "email": item.email, "role": item.role, "createdAt": item.created_at} for item in users]
+
+
+@app.get("/api/admin/applications")
+def admin_applications(user: User = Depends(require_role("ADMIN")), db: Session = Depends(db_session)):
+    rows = db.scalars(select(FundingApplication).order_by(FundingApplication.created_at.desc())).all(); result = []
+    for row in rows:
+        programme = db.get(FundingProgramme, row.programme_id); organisation = db.get(FunderOrganisation, programme.organisation_id) if programme else None
+        result.append(application_response(row, programme, db.get(User, row.entrepreneur_id), organisation))
+    return result
 
 
 @app.get("/api/admin/organisations/pending")

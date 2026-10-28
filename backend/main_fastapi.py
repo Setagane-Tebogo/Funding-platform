@@ -683,8 +683,9 @@ def update_application_status(application_id: int, request: ApplicationStatusReq
 
 def conversation_response(row: ChatConversation, current_user_id: int, db: Session) -> dict[str, Any]:
     entrepreneur = db.get(User, row.entrepreneur_id); funder = db.get(User, row.funder_id); programme = db.get(FundingProgramme, row.programme_id) if row.programme_id else None
+    entrepreneur_profile = db.scalar(select(UserProfile).where(UserProfile.user_id == row.entrepreneur_id)); funder_profile = db.scalar(select(UserProfile).where(UserProfile.user_id == row.funder_id))
     last = db.scalar(select(ChatMessage).where(ChatMessage.conversation_id == row.id).order_by(ChatMessage.created_at.desc()))
-    return {"id": row.id, "entrepreneurId": row.entrepreneur_id, "entrepreneurName": entrepreneur.name if entrepreneur else "Entrepreneur", "funderId": row.funder_id, "funderName": funder.name if funder else "Funder", "programmeId": row.programme_id, "programmeName": programme.programme_name if programme else None, "lastMessage": last.content if last else None, "lastMessageAt": last.created_at if last else None, "createdAt": row.created_at}
+    return {"id": row.id, "entrepreneurId": row.entrepreneur_id, "entrepreneurName": entrepreneur.name if entrepreneur else "Entrepreneur", "entrepreneurAvatar": entrepreneur_profile.avatar if entrepreneur_profile else None, "funderId": row.funder_id, "funderName": funder.name if funder else "Funder", "funderAvatar": funder_profile.avatar if funder_profile else None, "programmeId": row.programme_id, "programmeName": programme.programme_name if programme else None, "lastMessage": last.content if last else None, "lastMessageAt": last.created_at if last else None, "createdAt": row.created_at}
 
 
 def can_access_conversation(row: ChatConversation, user: User) -> bool:

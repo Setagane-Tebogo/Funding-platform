@@ -147,16 +147,16 @@ export default function AuthPage({ onLogin }) {
     <main className="auth-page">
       <section className="auth-brand-panel">
         <div className="auth-brand">
-          <img src="/fundbridge-logo.png" alt="FundBridge" className="auth-logo" />
+          <img src="/fundbridge-logo-transparent.png" alt="FundBridge" className="auth-logo" />
           
         </div>
 
         <div className="auth-brand-content">
-          <p className="auth-eyebrow">FUNDING STARTS HERE</p>
-          <h1>Great businesses deserve the chance to grow.</h1>
+          <p className="auth-eyebrow">A BETTER WAY TO FIND YOUR NEXT STEP</p>
+          <h1>Make room for what your business could become.</h1>
           <p>
-            Connect your business ambitions with funding opportunities
-            designed to help you move forward.
+            Put your business in front of funders, find programmes that fit,
+            and keep the conversation moving.
           </p>
 
           <div className="auth-feature">
@@ -184,11 +184,11 @@ export default function AuthPage({ onLogin }) {
       <section className="auth-form-panel">
         <div className="auth-form-container">
           <div className="auth-mobile-brand">
-            <img src="/fundbridge-logo.png" alt="FundBridge" className="auth-logo-mobile" />
+            <img src="/fundbridge-logo-transparent.png" alt="FundBridge" className="auth-logo-mobile" />
           </div>
 
           <p className="auth-eyebrow">
-            ENTREPRENEUR WORKSPACE
+            FUNDING, WITH A CLEARER WAY FORWARD
           </p>
 
           <h2>
@@ -343,8 +343,6 @@ export default function AuthPage({ onLogin }) {
     </main>
   );
 }
-
-
 
 
 

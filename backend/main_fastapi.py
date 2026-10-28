@@ -612,7 +612,6 @@ def edit_application(application_id: int, request: ApplicationUpdateRequest, use
 def delete_application(application_id: int, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
     row = db.get(FundingApplication, application_id)
     if not row or row.entrepreneur_id != user.id: raise HTTPException(status_code=404, detail="Application not found")
-    if row.status in {"ACCEPTED", "DECLINED"}: raise HTTPException(status_code=409, detail="This application can no longer be deleted")
     db.delete(row); db.commit(); return None
 
 def application_response(row: FundingApplication, programme: Optional[FundingProgramme], entrepreneur: Optional[User], organisation: Optional[FunderOrganisation] = None, db: Session = None) -> dict[str, Any]:
@@ -808,6 +807,16 @@ def admin_delete_programme(programme_id: int, user: User = Depends(require_role(
     db.delete(programme)
     db.commit()
     return {"message": "Programme and associated applications deleted", "programmeId": programme_id}
+
+
+@app.delete("/api/admin/applications/{application_id}")
+def admin_delete_application(application_id: int, user: User = Depends(require_role("ADMIN")), db: Session = Depends(db_session)):
+    row = db.get(FundingApplication, application_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Application not found")
+    db.delete(row)
+    db.commit()
+    return {"message": "Application deleted", "applicationId": application_id}
 
 
 @app.get("/api/admin/applications")

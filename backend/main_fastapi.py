@@ -602,6 +602,21 @@ def active_programmes(db: Session = Depends(db_session)):
     return [programme_response(row) for row in rows]
 
 
+@app.get("/api/funder/entrepreneurs/{entrepreneur_id}/profile")
+def funder_entrepreneur_profile(entrepreneur_id: int, user: User = Depends(require_role("FUNDER")), db: Session = Depends(db_session)):
+    entrepreneur = db.get(User, entrepreneur_id)
+    if not entrepreneur or entrepreneur.role != "ENTREPRENEUR":
+        raise HTTPException(status_code=404, detail="Entrepreneur not found")
+    organisation = db.scalar(select(FunderOrganisation).where(FunderOrganisation.user_id == user.id))
+    programme_ids = list(db.scalars(select(FundingProgramme.id).where(FundingProgramme.organisation_id == organisation.id)).all()) if organisation else []
+    connected = db.scalar(select(FundingApplication).where(FundingApplication.entrepreneur_id == entrepreneur_id, FundingApplication.programme_id.in_(programme_ids))) if programme_ids else None
+    business = db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == entrepreneur_id))
+    if not connected and not business:
+        raise HTTPException(status_code=403, detail="This profile is not connected to your organisation")
+    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == entrepreneur_id))
+    return {"id": entrepreneur.id, "name": entrepreneur.name, "email": entrepreneur.email, "phone": profile.phone if profile else None, "location": profile.location if profile else None, "bio": profile.bio if profile else None, "avatar": profile.avatar if profile else None, "business": profile_response(business) if business else None}
+
+
 @app.get("/api/funder/programmes/industry/{industry}")
 def programmes_by_industry(industry: str, db: Session = Depends(db_session)):
     rows = db.scalars(select(FundingProgramme).where(FundingProgramme.active.is_(True), FundingProgramme.industry.ilike(industry))).all()

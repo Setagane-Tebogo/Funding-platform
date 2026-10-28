@@ -826,3 +826,11 @@ button, input, textarea, select { max-width: 100%; }
   .funder-navigation.open .dashboard-tabs { display: grid; }
   .funder-navigation .dashboard-tabs button { width: 100%; text-align: left; border-radius: 8px; }
 }
+
+.profile-modal { position: relative; width: min(620px, calc(100vw - 32px)); max-height: 90vh; overflow: auto; padding: 30px; border-radius: 20px; background: #fff; box-shadow: 0 24px 70px rgba(20,25,65,.24); }
+.profile-modal-heading { display: flex; align-items: center; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid #ececf4; }
+.profile-modal-heading h2 { margin: 0 0 4px; }
+.profile-modal-heading p { margin: 0; color: #7b8096; }
+.profile-details { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding-top: 20px; }
+.profile-details p { margin: 0; color: #626981; line-height: 1.55; }
+.profile-details strong { display: block; margin-bottom: 4px; color: #202943; }

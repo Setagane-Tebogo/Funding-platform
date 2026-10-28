@@ -90,6 +90,17 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, nullable=False)
+    phone: Mapped[Optional[str]] = mapped_column(String(100))
+    location: Mapped[Optional[str]] = mapped_column(String(255))
+    bio: Mapped[Optional[str]] = mapped_column(Text)
+    avatar: Mapped[Optional[str]] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 class BusinessProfile(Base):
     __tablename__ = "business_profiles"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -198,6 +209,13 @@ class ResetPasswordRequest(BaseModel):
 class VerifyEmailRequest(BaseModel):
     email: str
     code: str = Field(min_length=6, max_length=6)
+
+
+class UserProfileRequest(BaseModel):
+    phone: Optional[str] = None
+    location: Optional[str] = None
+    bio: Optional[str] = None
+    avatar: Optional[str] = None
 
 class ProfileRequest(BaseModel):
     businessName: str

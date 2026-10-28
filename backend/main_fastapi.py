@@ -90,6 +90,17 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, nullable=False)
+    phone: Mapped[Optional[str]] = mapped_column(String(100))
+    location: Mapped[Optional[str]] = mapped_column(String(255))
+    bio: Mapped[Optional[str]] = mapped_column(Text)
+    avatar: Mapped[Optional[str]] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 class BusinessProfile(Base):
     __tablename__ = "business_profiles"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -198,6 +209,13 @@ class ResetPasswordRequest(BaseModel):
 class VerifyEmailRequest(BaseModel):
     email: str
     code: str = Field(min_length=6, max_length=6)
+
+
+class UserProfileRequest(BaseModel):
+    phone: Optional[str] = None
+    location: Optional[str] = None
+    bio: Optional[str] = None
+    avatar: Optional[str] = None
 
 class ProfileRequest(BaseModel):
     businessName: str
@@ -372,6 +390,27 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/profile")
+def get_profile(user: User = Depends(current_user), db: Session = Depends(db_session)):
+    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user.id))
+    return {**user_response(user), "phone": profile.phone if profile else None, "location": profile.location if profile else None, "bio": profile.bio if profile else None, "avatar": profile.avatar if profile else None}
+
+
+@app.put("/api/profile")
+def update_profile(request: UserProfileRequest, user: User = Depends(current_user), db: Session = Depends(db_session)):
+    profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user.id))
+    if not profile:
+        profile = UserProfile(user_id=user.id)
+        db.add(profile)
+    profile.phone = request.phone
+    profile.location = request.location
+    profile.bio = request.bio
+    profile.avatar = request.avatar
+    db.commit()
+    db.refresh(profile)
+    return {**user_response(user), "phone": profile.phone, "location": profile.location, "bio": profile.bio, "avatar": profile.avatar}
 
 
 @app.post("/api/auth/register")

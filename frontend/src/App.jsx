@@ -18,6 +18,8 @@ const menuItems = [
   { label: "Profile", icon: "◉" },
 ];
 
+const PROFILE_API = window.location.hostname === "localhost" ? (import.meta.env.VITE_API_URL || "http://localhost:8080") : "https://funding-platform-4vyt.onrender.com";
+
 function pageHash(page) {
   return `#${page.toLowerCase().replaceAll(" ", "-")}`;
 }
@@ -38,6 +40,19 @@ function App() {
   });
   const [activePage, setActivePage] = useState(pageFromHash);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [accountProfile, setAccountProfile] = useState(null);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    fetch(`${PROFILE_API}/api/profile`, { headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` } }).then((response) => response.ok ? response.json() : null).then((profile) => { if (profile) setAccountProfile(profile); }).catch(() => undefined);
+    return undefined;
+  }, [user]);
+
+  useEffect(() => {
+    function refreshProfile(event) { if (event.detail) setAccountProfile(event.detail); }
+    window.addEventListener("fundbridge-profile-updated", refreshProfile);
+    return () => window.removeEventListener("fundbridge-profile-updated", refreshProfile);
+  }, []);
 
   useEffect(() => {
     if (!user) return undefined;
@@ -124,8 +139,8 @@ function App() {
   }
 
   if (!user) return <AuthPage onLogin={handleLogin} />;
-  if (user.role === "FUNDER") return <RolePage user={user} onLogout={handleLogout}><FunderDashboard /></RolePage>;
-  if (user.role === "ADMIN") return <RolePage user={user} onLogout={handleLogout}><AdminDashboard /></RolePage>;
+  if (user.role === "FUNDER") return <RolePage user={user} profile={accountProfile} onLogout={handleLogout}><FunderDashboard /></RolePage>;
+  if (user.role === "ADMIN") return <RolePage user={user} profile={accountProfile} onLogout={handleLogout}><AdminDashboard /></RolePage>;
 
   return (
     <div className="app-shell">
@@ -136,16 +151,16 @@ function App() {
         <nav>{menuItems.map((item) => <button key={item.label} className={`nav-item ${activePage === item.label ? "active" : ""}`} onClick={() => navigate(item.label)}><span className="nav-icon">{item.icon}</span>{item.label}</button>)}</nav>
       </aside>
       <main className="main-content">
-        <header className="topbar"><div className="topbar-title"><button type="button" className="menu-toggle" aria-label={menuOpen ? "Close navigation" : "Open navigation"} onClick={() => setMenuOpen((open) => !open)}><span></span><span></span><span></span></button><div><span className="breadcrumb">Workspace /</span><strong> {activePage}</strong></div></div><div className="user-menu"><button type="button" className="profile-top-button" onClick={() => navigate("Profile")}><div className="avatar">{(user.name || user.email || "U").slice(0, 2).toUpperCase()}</div><span><strong>{user.name || "Entrepreneur"}</strong><small>{user.email}</small></span></button><button type="button" className="logout-button" onClick={handleLogout}>Log out</button></div></header>
+        <header className="topbar"><div className="topbar-title"><button type="button" className="menu-toggle" aria-label={menuOpen ? "Close navigation" : "Open navigation"} onClick={() => setMenuOpen((open) => !open)}><span></span><span></span><span></span></button><div><span className="breadcrumb">Workspace /</span><strong> {activePage}</strong></div></div><div className="user-menu"><button type="button" className="profile-top-button" onClick={() => navigate("Profile")}><div className="avatar">{accountProfile?.avatar ? <img src={accountProfile.avatar} alt="Profile" /> : (user.name || user.email || "U").slice(0, 2).toUpperCase()}</div><span><strong>{accountProfile?.name || user.name || "Entrepreneur"}</strong><small>{user.email}</small></span></button><button type="button" className="logout-button" onClick={handleLogout}>Log out</button></div></header>
         <section className="page-content">{renderPage()}</section>
       </main>
     </div>
   );
 }
 
-function RolePage({ user, onLogout, children }) {
+function RolePage({ user, profile, onLogout, children }) {
   const [showProfile, setShowProfile] = useState(false);
-  return <div className="app-shell"><main className="main-content"><header className="topbar"><div><span className="breadcrumb">FundBridge /</span><strong> Workspace</strong></div><div className="user-menu"><button type="button" className="profile-top-button" onClick={() => setShowProfile(true)}><div className="avatar">{(user.name || user.email).slice(0, 2).toUpperCase()}</div><span><strong>{user.name || user.email}</strong><small>{user.role}</small></span></button><button type="button" className="logout-button" onClick={onLogout}>Log out</button></div></header><section className="page-content">{showProfile ? <ProfilePage /> : children}</section></main></div>
+  return <div className="app-shell"><main className="main-content"><header className="topbar"><div><span className="breadcrumb">FundBridge /</span><strong> Workspace</strong></div><div className="user-menu"><button type="button" className="profile-top-button" onClick={() => setShowProfile(true)}><div className="avatar">{profile?.avatar ? <img src={profile.avatar} alt="Profile" /> : (profile?.name || user.name || user.email).slice(0, 2).toUpperCase()}</div><span><strong>{profile?.name || user.name || user.email}</strong><small>{user.role}</small></span></button><button type="button" className="logout-button" onClick={onLogout}>Log out</button></div></header><section className="page-content">{showProfile ? <ProfilePage /> : children}</section></main></div>
 }
 
 export default App;

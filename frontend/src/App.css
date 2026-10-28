@@ -799,6 +799,8 @@ button, input, textarea, select { max-width: 100%; }
 .profile-top-button { display: flex; align-items: center; gap: 9px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; padding: 0; }
 .profile-top-button > span { display: grid; gap: 2px; }
 .profile-top-button small { color: #7b8096; font-size: 11px; }
+.profile-top-button .avatar { overflow: hidden; }
+.profile-top-button .avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 .profile-heading { margin-bottom: 22px; }
 .profile-heading h1 { margin: 0 0 8px; font-size: 34px; color: #15244a; }
 .profile-card { padding: 30px; border: 1px solid #e5e6f0; border-radius: 22px; background: #fff; box-shadow: 0 16px 36px rgba(32, 39, 88, .07); }

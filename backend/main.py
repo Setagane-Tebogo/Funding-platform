@@ -689,6 +689,18 @@ def create_conversation(request: ConversationRequest, user: User = Depends(curre
     return conversation_response(row, user.id, db)
 
 
+@app.delete("/api/chat/conversations/{conversation_id}")
+def delete_chat_conversation(conversation_id: int, user: User = Depends(current_user), db: Session = Depends(db_session)):
+    conversation = db.get(ChatConversation, conversation_id)
+    if not conversation or not can_access_conversation(conversation, user):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    for message in db.scalars(select(ChatMessage).where(ChatMessage.conversation_id == conversation_id)).all():
+        db.delete(message)
+    db.delete(conversation)
+    db.commit()
+    return {"message": "Conversation deleted", "conversationId": conversation_id}
+
+
 @app.get("/api/chat/conversations/{conversation_id}/messages")
 def chat_messages(conversation_id: int, user: User = Depends(current_user), db: Session = Depends(db_session)):
     conversation = db.get(ChatConversation, conversation_id)
@@ -835,9 +847,13 @@ def delete_user(user_id: int, user: User = Depends(require_role("ADMIN")), db: S
     organisation = db.scalar(select(FunderOrganisation).where(FunderOrganisation.user_id == user_id))
     programme_ids = [item.id for item in db.scalars(select(FundingProgramme).where(FundingProgramme.organisation_id == organisation.id)).all()] if organisation else []
     applications = db.scalars(select(FundingApplication).where((FundingApplication.entrepreneur_id == user_id) | FundingApplication.programme_id.in_(programme_ids))).all()
-    conversations = db.scalars(select(ChatConversation).where((ChatConversation.entrepreneur_id == user_id) | (ChatConversation.funder_id == user_id))).all()
-    conversation_ids = [item.id for item in conversations]
-    for item in db.scalars(select(ChatMessage).where(ChatMessage.conversation_id.in_(conversation_ids))).all(): db.delete(item)
+    conversations = db.scalars(select(ChatConversation).where((ChatConversation.entrepreneur_id == user_id) | (ChatConversation.funder_id == user_id) | ChatConversation.programme_id.in_(programme_ids))).all()
+    conversation_ids = {item.id for item in conversations}
+    sent_messages = db.scalars(select(ChatMessage).where(ChatMessage.sender_id == user_id)).all()
+    conversation_ids.update(item.conversation_id for item in sent_messages)
+    all_messages = db.scalars(select(ChatMessage).where(ChatMessage.conversation_id.in_(conversation_ids))).all()
+    for item in all_messages: db.delete(item)
+    conversations = db.scalars(select(ChatConversation).where(ChatConversation.id.in_(conversation_ids))).all()
     for item in conversations: db.delete(item)
     for item in applications: db.delete(item)
     for item in db.scalars(select(BusinessProfile).where(BusinessProfile.user_id == user_id)).all(): db.delete(item)

@@ -790,6 +790,27 @@ def admin_users(user: User = Depends(require_role("ADMIN")), db: Session = Depen
     return [{"id": item.id, "name": item.name, "email": item.email, "role": item.role, "createdAt": item.created_at} for item in users]
 
 
+@app.get("/api/admin/programmes")
+def admin_programmes(user: User = Depends(require_role("ADMIN")), db: Session = Depends(db_session)):
+    rows = db.scalars(select(FundingProgramme).order_by(FundingProgramme.created_at.desc())).all()
+    return [programme_response(row, (db.scalar(select(FunderOrganisation.organisation_name).where(FunderOrganisation.id == row.organisation_id)) or "Organisation")) for row in rows]
+
+
+@app.delete("/api/admin/programmes/{programme_id}")
+def admin_delete_programme(programme_id: int, user: User = Depends(require_role("ADMIN")), db: Session = Depends(db_session)):
+    programme = db.get(FundingProgramme, programme_id)
+    if not programme:
+        raise HTTPException(status_code=404, detail="Programme not found")
+    conversations = db.scalars(select(ChatConversation).where(ChatConversation.programme_id == programme_id)).all()
+    conversation_ids = [item.id for item in conversations]
+    for item in db.scalars(select(ChatMessage).where(ChatMessage.conversation_id.in_(conversation_ids))).all(): db.delete(item)
+    for item in conversations: db.delete(item)
+    for item in db.scalars(select(FundingApplication).where(FundingApplication.programme_id == programme_id)).all(): db.delete(item)
+    db.delete(programme)
+    db.commit()
+    return {"message": "Programme and associated applications deleted", "programmeId": programme_id}
+
+
 @app.get("/api/admin/applications")
 def admin_applications(user: User = Depends(require_role("ADMIN")), db: Session = Depends(db_session)):
     rows = db.scalars(select(FundingApplication).order_by(FundingApplication.created_at.desc())).all(); result = []

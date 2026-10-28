@@ -9,11 +9,11 @@ import FunderDashboard from "./FunderDashboard";
 import AdminDashboard from "./AdminDashboard";
 
 const menuItems = [
-  { label: "Overview", icon: "Overview" },
-  { label: "Business Profile", icon: "Business" },
-  { label: "Find Funding", icon: "Search" },
-  { label: "My Applications", icon: "Applications" },
-  { label: "Messages", icon: "Messages" },
+  { label: "Overview", icon: "⌂" },
+  { label: "Business Profile", icon: "▤" },
+  { label: "Find Funding", icon: "⌕" },
+  { label: "My Applications", icon: "▣" },
+  { label: "Messages", icon: "□" },
 ];
 
 function pageHash(page) {

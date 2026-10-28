@@ -693,15 +693,19 @@ footer {
 .applications-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .sort-control { display: grid; gap: 7px; min-width: 170px; color: #656a82; font-size: 12px; font-weight: 700; }
 .sort-control select { width: 100%; padding: 11px 12px; border: 1px solid #dfe1ed; border-radius: 9px; background: #fff; color: #30344b; font: inherit; }
-.application-card { min-height: 300px; box-shadow: 0 8px 24px rgba(35, 40, 85, .04); }
+.applications-page { max-width: 1500px; }
+.application-card { min-height: 300px; padding: 22px; border-color: #e3e5f0; box-shadow: 0 12px 30px rgba(35, 40, 85, .06); }
 .application-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .application-card-top small { color: #85899d; }
 .status-badge { display: inline-flex; align-items: center; width: fit-content; padding: 6px 10px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase; }
 .status-submitted, .status-reviewing { background: #fff4dc; color: #9a6514; }
 .status-accepted { background: #e4f7ed; color: #16734c; }
 .status-declined { background: #ffebed; color: #ac3f4d; }
-.application-card h3 { margin-top: 2px; }
+.application-card h3 { display: flex; align-items: center; gap: 12px; margin-top: 2px; font-size: 20px; }
+.application-card h3::before { content: ""; display: inline-block; width: 38px; height: 38px; flex: 0 0 38px; border: 1px solid #dedbff; border-radius: 50%; background: linear-gradient(#f4f2ff, #ebe8ff); box-shadow: inset 0 0 0 8px #f8f7ff; }
 .organisation-name { color: #5e6480 !important; font-weight: 700; }
+.application-card .application-proposal { margin-top: 6px; padding-top: 14px; border-top: 1px solid #ececf4; color: #303753; line-height: 1.55; }
+.application-card > small { color: #85899d; }
 .application-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 8px; }
 .application-actions button { width: 100%; min-width: 0; }
 .programme-card .application-actions button.secondary-button { width: 100%; min-width: 0; background: #f7f6ff; }
@@ -760,7 +764,7 @@ button, input, textarea, select { max-width: 100%; }
   .application-modal { padding: 18px; }
   .application-modal .panel-heading { align-items: flex-start; }
 }
-.nav-icon { display: none; }
+.nav-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; color: #69708b; font-size: 18px; line-height: 1; }
 
 @media (max-width: 700px) {
   .menu-toggle { display: block; }
@@ -769,7 +773,7 @@ button, input, textarea, select { max-width: 100%; }
   .sidebar .brand { justify-content: flex-start; padding: 0 8px; }
   .sidebar .brand > div:last-child, .sidebar .nav-label { display: block; }
   .sidebar .nav-item { display: flex; justify-content: flex-start; padding: 13px 12px; font-size: 14px; }
-  .sidebar .nav-icon { display: none; }
+  .sidebar .nav-icon { display: inline-flex; }
   .sidebar-backdrop { display: block; position: fixed; inset: 0; z-index: 30; border: 0; background: rgba(21, 28, 57, .42); }
   .topbar { position: relative; z-index: 1; }
 }

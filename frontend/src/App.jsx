@@ -96,7 +96,7 @@ function App() {
     if (activePage === "Business Profile") return <BusinessProfile />;
     if (activePage === "Find Funding") return <FindFunding />;
     if (activePage === "My Applications") return <MyApplications />;
-    if (activePage === "Messages") return <ChatPanel />;
+    if (activePage === "Messages") return <ChatPanel onProfile={() => navigate("Profile")} />;
     if (activePage === "Profile") return <ProfilePage />;
 
     return (
@@ -136,7 +136,7 @@ function App() {
         <nav>{menuItems.map((item) => <button key={item.label} className={`nav-item ${activePage === item.label ? "active" : ""}`} onClick={() => navigate(item.label)}><span className="nav-icon">{item.icon}</span>{item.label}</button>)}</nav>
       </aside>
       <main className="main-content">
-        <header className="topbar"><div className="topbar-title"><button type="button" className="menu-toggle" aria-label={menuOpen ? "Close navigation" : "Open navigation"} onClick={() => setMenuOpen((open) => !open)}><span></span><span></span><span></span></button><div><span className="breadcrumb">Workspace /</span><strong> {activePage}</strong></div></div><div className="user-menu"><div className="avatar">{(user.name || user.email || "U").slice(0, 2).toUpperCase()}</div><div><strong>{user.name || "Entrepreneur"}</strong><span>{user.email}</span></div><button type="button" className="logout-button" onClick={handleLogout}>Log out</button></div></header>
+        <header className="topbar"><div className="topbar-title"><button type="button" className="menu-toggle" aria-label={menuOpen ? "Close navigation" : "Open navigation"} onClick={() => setMenuOpen((open) => !open)}><span></span><span></span><span></span></button><div><span className="breadcrumb">Workspace /</span><strong> {activePage}</strong></div></div><div className="user-menu"><button type="button" className="profile-top-button" onClick={() => navigate("Profile")}><div className="avatar">{(user.name || user.email || "U").slice(0, 2).toUpperCase()}</div><span><strong>{user.name || "Entrepreneur"}</strong><small>{user.email}</small></span></button><button type="button" className="logout-button" onClick={handleLogout}>Log out</button></div></header>
         <section className="page-content">{renderPage()}</section>
       </main>
     </div>
@@ -144,7 +144,8 @@ function App() {
 }
 
 function RolePage({ user, onLogout, children }) {
-  return <div className="app-shell"><main className="main-content"><header className="topbar"><div><span className="breadcrumb">FundBridge /</span><strong> Workspace</strong></div><div className="user-menu"><div className="avatar">{(user.name || user.email).slice(0, 2).toUpperCase()}</div><div><strong>{user.name || user.email}</strong><span>{user.role}</span></div><button type="button" className="logout-button" onClick={onLogout}>Log out</button></div></header><section className="page-content">{children}</section></main></div>
+  const [showProfile, setShowProfile] = useState(false);
+  return <div className="app-shell"><main className="main-content"><header className="topbar"><div><span className="breadcrumb">FundBridge /</span><strong> Workspace</strong></div><div className="user-menu"><button type="button" className="profile-top-button" onClick={() => setShowProfile(true)}><div className="avatar">{(user.name || user.email).slice(0, 2).toUpperCase()}</div><span><strong>{user.name || user.email}</strong><small>{user.role}</small></span></button><button type="button" className="logout-button" onClick={onLogout}>Log out</button></div></header><section className="page-content">{showProfile ? <ProfilePage /> : children}</section></main></div>
 }
 
 export default App;

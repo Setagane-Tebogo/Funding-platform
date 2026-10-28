@@ -216,6 +216,9 @@ class AnalysisRequest(BaseModel):
     monthlyRevenue: Decimal
     monthlyExpenses: Decimal
     monthlyGrowthPercent: Decimal = Decimal("0")
+    industry: str = ""
+    businessDescription: str = ""
+    businessStage: str = ""
 
 
 class ApplicationRequest(BaseModel):
@@ -524,20 +527,34 @@ async def grok_assessment(request: AnalysisRequest, deterministic: dict[str, Any
 
 @app.post("/api/entrepreneur/business-analysis")
 async def analyse(request: AnalysisRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
-    if min(request.startupCosts, request.monthlyRevenue, request.monthlyExpenses) < 0: raise HTTPException(status_code=400, detail="Financial values cannot be negative.")
-    profit = request.monthlyRevenue - request.monthlyExpenses
-    break_even = int((request.startupCosts / profit).to_integral_value(rounding="ROUND_CEILING")) if profit > 0 else None
-    outlook = "Potentially profitable" if profit > 0 else "Break-even only" if profit == 0 else "Needs improvement"
-    summary = "Your projected revenue is higher than your projected monthly expenses." if profit > 0 else "Your current projection covers operating costs but does not recover startup costs." if profit == 0 else "Your projected monthly expenses are higher than your projected revenue."
-    result = {"outlook": outlook, "summary": summary, "estimatedBreakEvenMonths": break_even, "estimatedMonthlyProfit": profit, "estimatedAnnualProfit": profit * 12, "monthlyExpenses": request.monthlyExpenses, "confidence": "Medium" if profit > 0 else "Low", "disclaimer": "This is an advisory estimate based only on the figures you entered. It is not a funding or profit guarantee."}
-    result["aiAssessment"] = await grok_assessment(request, result)
-    result["aiProvider"] = "grok" if result["aiAssessment"] else "deterministic-fallback"
+    if min(request.startupCosts, request.monthlyRevenue, request.monthlyExpenses, request.monthlyGrowthPercent) < 0:
+        raise HTTPException(status_code=400, detail="Financial values cannot be negative.")
+    revenue = float(request.monthlyRevenue); expenses = float(request.monthlyExpenses); startup = float(request.startupCosts); growth = min(float(request.monthlyGrowthPercent), 25.0) / 100; monthly_profit = revenue - expenses
+    factors = {"technology": (88, "High", "Technology benefits from continued digital adoption, but competition is strong."), "ai": (92, "Very high", "AI demand is strong, but the proposal must solve a specific customer problem."), "artificial intelligence": (92, "Very high", "AI demand is strong, but the proposal must solve a specific customer problem."), "healthcare": (84, "High", "Healthcare demand is durable, but compliance and trust affect growth."), "agriculture": (78, "High", "Agricultural demand is durable, while weather and input costs create risk."), "education": (76, "High", "Education has durable demand, with affordability and customer acquisition risks."), "manufacturing": (74, "Moderate-high", "Manufacturing can scale through contracts, but working capital matters."), "retail": (65, "Moderate", "Retail depends on pricing, location, repeat customers, and competition."), "tourism": (63, "Moderate", "Tourism is sensitive to seasonality and economic conditions.")}
+    demand_score, demand_level, demand_note = (60, "Moderate", "Demand depends on the target market, customer validation, pricing, and execution.")
+    for key, factor in factors.items():
+        if key in request.industry.strip().lower(): demand_score, demand_level, demand_note = factor; break
+    def projection(month):
+        projected_revenue = revenue * ((1 + growth) ** month); projected_expenses = expenses * ((1 + (growth * 0.55)) ** month); return projected_revenue, projected_expenses, projected_revenue - projected_expenses
+    monthly = projection(0)[2]; projected12 = projection(12)[2]; projected18 = projection(18)[2]; projected24 = projection(24)[2]
+    break_even = int((startup / monthly_profit) + 0.9999) if monthly_profit > 0 and startup > 0 else (0 if monthly_profit > 0 else None)
+    profitability_month = 0 if monthly_profit > 0 else None
+    if profitability_month is None:
+        for month in range(1, 61):
+            if projection(month)[2] > 0: profitability_month = month; break
+    risks = []
+    if monthly_profit <= 0: risks.append("Current monthly expenses are higher than revenue.")
+    if startup > 0 and monthly_profit > 0 and break_even and break_even > 24: risks.append("Startup-cost recovery is expected to take more than two years.")
+    if growth == 0: risks.append("No monthly growth was provided; the forecast assumes flat revenue.")
+    if len(request.businessDescription.strip()) < 40: risks.append("Add customer, pricing, and traction detail to improve confidence.")
+    if not risks: risks.append("Validate demand with paying customers before committing the full investment.")
+    outlook = "Strong potential" if monthly_profit > 0 and demand_score >= 80 else "Potentially profitable" if monthly_profit > 0 else "Needs improvement"
+    confidence = "High" if monthly_profit > 0 and growth > 0 and len(request.businessDescription.strip()) >= 40 else "Medium" if monthly_profit > 0 else "Low"
+    horizon = f"about {profitability_month / 12:.1f} years" if profitability_month and profitability_month >= 12 else "within the first year" if profitability_month == 0 else "not reached within the five-year forecast"
+    result = {"outlook": outlook, "summary": f"At the figures supplied, the business is projected to become monthly-profitable {horizon}. The industry demand signal is {demand_level.lower()}, but execution and customer validation remain essential.", "estimatedBreakEvenMonths": break_even, "estimatedProfitabilityMonths": profitability_month, "estimatedMonthlyProfit": round(monthly_profit, 2), "estimatedAnnualProfit": round(monthly_profit * 12, 2), "projectedProfit12Months": round(projected12, 2), "projectedProfit18Months": round(projected18, 2), "projectedProfit24Months": round(projected24, 2), "monthlyExpenses": round(expenses, 2), "demandScore": demand_score, "demandLevel": demand_level, "demandNote": demand_note, "riskFlags": risks, "confidence": confidence, "aiAssessment": None, "aiProvider": "free-rules-engine", "disclaimer": "This is an advisory estimate based on the figures and general industry heuristics you entered. It is not live market research, a funding decision, or a profit guarantee."}
     profile = db.scalar(select(BusinessProfile).where(BusinessProfile.id == request.profileId, BusinessProfile.user_id == user.id)) if request.profileId else db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == user.id).order_by(BusinessProfile.updated_at.desc()))
-    if profile:
-        profile.analysis_result = json.dumps(result, default=str)
-        db.commit()
+    if profile: profile.analysis_result = json.dumps(result, default=str); db.commit()
     return result
-
 
 @app.get("/api/funder/programmes/active")
 @app.get("/api/funder/programmes/active/")
@@ -831,4 +848,6 @@ def delete_user(user_id: int, user: User = Depends(require_role("ADMIN")), db: S
     db.delete(target)
     db.commit()
     return {"message": "User and all associated data deleted", "userId": user_id}
+
+
 

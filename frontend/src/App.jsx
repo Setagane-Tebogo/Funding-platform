@@ -20,6 +20,12 @@ function pageHash(page) {
   return `#${page.toLowerCase().replaceAll(" ", "-")}`;
 }
 
+function pageFromHash() {
+  const hash = window.location.hash.replace(/^#/, "");
+  const page = menuItems.find((item) => item.label.toLowerCase().replaceAll(" ", "-") === hash);
+  return page?.label || "Overview";
+}
+
 function App() {
   const [user, setUser] = useState(() => {
     try {
@@ -28,7 +34,7 @@ function App() {
       return null;
     }
   });
-  const [activePage, setActivePage] = useState("Overview");
+  const [activePage, setActivePage] = useState(pageFromHash);
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -98,13 +104,6 @@ function App() {
             <h1>Build your next opportunity.</h1>
             <p className="subtitle">Manage your business profile, understand your numbers, and find funding that fits your growth plan.</p>
           </div>
-          <button className="primary-button" onClick={() => navigate("Business Profile")}>Complete your profile <span></span></button>
-        </section>
-
-        <section className="stats-grid dashboard-stats">
-          <div className="stat-card"><div className="stat-top"><span>Funding opportunities</span></div><h2>Explore</h2><p>Find programmes matched to your goals</p></div>
-          <div className="stat-card"><div className="stat-top"><span>Business analysis</span></div><h2>Ready</h2><p>Estimate your path to profitability</p></div>
-          <div className="stat-card"><div className="stat-top"><span>Applications</span></div><h2>Track</h2><p>Follow every submitted application</p></div>
         </section>
 
         <section className="dashboard-grid">
@@ -116,7 +115,6 @@ function App() {
               <button className="action-card" onClick={() => navigate("My Applications")}><strong>Track applications</strong><small>Review the funding applications you have submitted.</small></button>
             </div>
           </div>
-          <div className="content-panel insight-panel"><p className="eyebrow">FUNDING READINESS</p><h3>Strong proposals start with clear numbers.</h3><p>Complete your profile and run the business analysis to prepare a clearer funding story.</p><button className="secondary-button" onClick={() => navigate("Business Profile")}>Analyse my proposal</button></div>
         </section>
       </div>
     );

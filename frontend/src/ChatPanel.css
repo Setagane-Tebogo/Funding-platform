@@ -13,16 +13,16 @@
 .chat-compose { display: flex; gap: 10px; padding: 12px; border-top: 1px solid #ececf5; }
 .chat-compose input { flex: 1; border: 1px solid #dfe1ed; border-radius: 8px; padding: 11px; }
 @media (max-width: 700px) { .chat-layout { grid-template-columns: 1fr; } .conversation-list { border-right: 0; border-bottom: 1px solid #ececf5; max-height: 160px; overflow-y: auto; } }
-.chat-panel { padding: 0; overflow: hidden; }
-.chat-panel > .panel-heading { padding: 16px 20px; margin: 0; background: #fff; }
+.chat-panel { padding: 28px; overflow: hidden; border: 1px solid #e7e8f2; border-radius: 20px; background: #fff; box-shadow: 0 14px 36px rgba(35, 40, 85, .06); }
+.chat-panel > .panel-heading { padding: 0 0 22px; margin: 0; background: #fff; }
 .chat-heading { align-items: center; }
 .chat-search { display: flex; align-items: center; gap: 10px; }
 .chat-search input, .chat-search select { border: 1px solid #e0e2ef; border-radius: 22px; padding: 10px 14px; background: #fff; color: #30344b; font: inherit; font-size: 12px; }
 .chat-search input { width: min(300px, 30vw); }
 .chat-search select { min-width: 76px; }
 .chat-subtitle { margin: 5px 0 0; color: #85899d; font-size: 12px; }
-.chat-layout { min-height: 560px; height: calc(100vh - 190px); max-height: 760px; border-radius: 0; border-left: 0; border-right: 0; background: #efeae2; }
-.conversation-list { background: #fff; padding: 8px 5px; overflow-y: auto; }
+.chat-layout { min-height: 560px; height: calc(100vh - 260px); max-height: 760px; border: 1px solid #e6e8f2; border-radius: 16px; background: #f8f9fd; overflow: hidden; }
+.conversation-list { background: #fff; padding: 10px; overflow-y: auto; }
 .conversation-item { border-bottom: 1px solid #f0f0f0; border-radius: 0; padding: 14px 12px; }
 .conversation-item.active { background: #f0f2f5; border-left: 3px solid #6152df; }
 .conversation-item { display: flex; align-items: center; gap: 8px; }
@@ -33,15 +33,15 @@
 .chat-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .chat-empty { flex: 1; display: grid; place-content: center; gap: 8px; text-align: center; color: #68708a; }
 .chat-empty strong { color: #30344b; font-size: 16px; }
-.chat-window { background: #efeae2; background-image: radial-gradient(#e0d8ce 1px, transparent 1px); background-size: 18px 18px; }
-.chat-title { background: #f0f2f5; padding: 13px 18px; }
-.chat-messages { max-height: none; padding: 20px 7%; }
+.chat-window { background: #fbfcff; background-image: radial-gradient(#e9eaf4 1px, transparent 1px); background-size: 18px 18px; }
+.chat-title { background: rgba(255,255,255,.96); padding: 16px 20px; border-bottom: 1px solid #e8e9f2; }
+.chat-messages { max-height: none; padding: 24px 7%; }
 .chat-bubble { max-width: min(72%, 520px); padding: 8px 11px; border-radius: 8px; box-shadow: 0 1px 1px rgba(0,0,0,.08); }
 .chat-bubble.mine { background: #d9fdd3; color: #1f2d20; border-radius: 8px; }
 .chat-bubble.mine small { color: #667466; }
-.chat-compose { margin: 0; padding: 10px 16px; background: #f0f2f5; }
-.chat-compose input { border: 0; border-radius: 22px; padding: 12px 16px; background: #fff; }
-.chat-compose button { border-radius: 22px; padding: 10px 18px; }
-@media (max-width: 700px) { .chat-layout { height: calc(100svh - 190px); min-height: 420px; } .chat-messages { padding: 16px 10px; } .chat-bubble { max-width: 88%; } }
+.chat-compose { margin: 0; padding: 14px 18px; background: rgba(255,255,255,.96); border-top: 1px solid #e8e9f2; }
+.chat-compose input { border: 1px solid #e0e2ef; border-radius: 22px; padding: 12px 16px; background: #fff; }
+.chat-compose button { border-radius: 22px; padding: 10px 22px; }
+@media (max-width: 700px) { .chat-panel { padding: 16px; border-radius: 14px; } .chat-layout { height: calc(100svh - 240px); min-height: 420px; } .chat-messages { padding: 16px 10px; } .chat-bubble { max-width: 88%; } }
 @media (max-width: 700px) { .conversation-delete { padding: 6px 7px; font-size: 10px; } .chat-delete-current { padding: 6px 8px; } }
 @media (max-width: 700px) { .chat-heading { align-items: flex-start; flex-direction: column; } .chat-search { width: 100%; } .chat-search input { width: 100%; } .chat-search select { flex: 0 0 76px; } }

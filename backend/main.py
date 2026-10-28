@@ -694,8 +694,7 @@ def delete_chat_conversation(conversation_id: int, user: User = Depends(current_
     conversation = db.get(ChatConversation, conversation_id)
     if not conversation or not can_access_conversation(conversation, user):
         raise HTTPException(status_code=404, detail="Conversation not found")
-    for message in db.scalars(select(ChatMessage).where(ChatMessage.conversation_id == conversation_id)).all():
-        db.delete(message)
+    db.execute(text("DELETE FROM chat_messages WHERE conversation_id = :conversation_id"), {"conversation_id": conversation_id})
     db.delete(conversation)
     db.commit()
     return {"message": "Conversation deleted", "conversationId": conversation_id}

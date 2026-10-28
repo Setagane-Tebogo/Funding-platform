@@ -795,6 +795,24 @@ button, input, textarea, select { max-width: 100%; }
   .topbar { position: relative; z-index: 1; }
 }
 
+.profile-page { max-width: 980px; margin: 0 auto; }
+.profile-heading { margin-bottom: 22px; }
+.profile-heading h1 { margin: 0 0 8px; font-size: 34px; color: #15244a; }
+.profile-card { padding: 30px; border: 1px solid #e5e6f0; border-radius: 22px; background: #fff; box-shadow: 0 16px 36px rgba(32, 39, 88, .07); }
+.profile-identity { display: flex; align-items: center; gap: 20px; padding-bottom: 26px; margin-bottom: 26px; border-bottom: 1px solid #ececf4; }
+.profile-identity h2 { margin: 0 0 6px; font-size: 18px; color: #1d2a50; }
+.profile-avatar { display: grid; place-items: center; flex: 0 0 92px; width: 92px; height: 92px; border-radius: 50%; background: linear-gradient(135deg, #e8e5ff, #dceeff); color: #5143d2; font-size: 26px; font-weight: 800; overflow: hidden; }
+.profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.muted { margin: 0 0 12px; color: #7b8096; font-size: 13px; }
+.upload-button { display: inline-flex; cursor: pointer; }
+.profile-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.profile-form-grid label { display: grid; gap: 7px; color: #4e5570; font-size: 13px; font-weight: 700; }
+.profile-form-grid input, .profile-form-grid textarea { width: 100%; box-sizing: border-box; padding: 12px 13px; border: 1px solid #dcddec; border-radius: 10px; background: #fff; color: #212943; font: inherit; }
+.profile-form-grid input:disabled { background: #f5f5f9; color: #777d91; }
+.profile-wide { grid-column: 1 / -1; }
+.profile-actions { display: flex; justify-content: flex-end; margin-top: 24px; }
+@media (max-width: 600px) { .profile-card { padding: 20px; } .profile-identity { align-items: flex-start; flex-direction: column; } .profile-form-grid { grid-template-columns: 1fr; } .profile-wide { grid-column: auto; } }
+
 @media (max-width: 700px) {
   .funder-navigation { position: relative; margin: 16px 0; }
   .funder-menu-toggle { display: flex; width: 44px; height: 40px; flex-direction: column; justify-content: center; gap: 4px; padding: 9px; border: 1px solid #deddec; border-radius: 10px; background: #fff; cursor: pointer; }

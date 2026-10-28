@@ -7,6 +7,7 @@ import MyApplications from "./MyApplications";
 import ChatPanel from "./ChatPanel";
 import FunderDashboard from "./FunderDashboard";
 import AdminDashboard from "./AdminDashboard";
+import ProfilePage from "./ProfilePage";
 
 const menuItems = [
   { label: "Overview", icon: "⌂" },
@@ -14,6 +15,7 @@ const menuItems = [
   { label: "Find Funding", icon: "⌕" },
   { label: "My Applications", icon: "▣" },
   { label: "Messages", icon: "□" },
+  { label: "Profile", icon: "◉" },
 ];
 
 function pageHash(page) {
@@ -95,6 +97,7 @@ function App() {
     if (activePage === "Find Funding") return <FindFunding />;
     if (activePage === "My Applications") return <MyApplications />;
     if (activePage === "Messages") return <ChatPanel />;
+    if (activePage === "Profile") return <ProfilePage />;
 
     return (
       <div className="dashboard-page">

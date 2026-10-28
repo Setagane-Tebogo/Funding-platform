@@ -6,3 +6,4 @@ backend/src/main/resources/application.properties
 .env 
 .env.* 
 *.log 
+data/

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import logging
 import json
+import math
+from pathlib import Path
 import httpx
 import smtplib
 import secrets
@@ -53,6 +55,22 @@ class Settings(BaseSettings):
 settings = Settings()
 engine = create_engine(settings.resolved_database_url(), pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+MODEL_PATH = Path(__file__).resolve().parent.parent / "model" / "bankruptcy_model.json"
+
+
+def load_model_artifact() -> Optional[dict[str, Any]]:
+    try:
+        return json.loads(MODEL_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def predict_financial_distress(ratios: list[float], artifact: dict[str, Any]) -> float:
+    score = artifact["weights"][0]
+    for index, value in enumerate(ratios):
+        score += artifact["weights"][index + 1] * ((value - artifact["mean"][index]) / (artifact["scale"][index] or 1.0))
+    return 1 / (1 + math.exp(-max(-30, min(30, score))))
 
 
 class Base(DeclarativeBase):
@@ -234,9 +252,18 @@ class AnalysisRequest(BaseModel):
     monthlyRevenue: Decimal
     monthlyExpenses: Decimal
     monthlyGrowthPercent: Decimal = Decimal("0")
+    totalAssets: Decimal = Decimal("0")
+    totalLiabilities: Decimal = Decimal("0")
+    cashOnHand: Decimal = Decimal("0")
+    customerCount: int = 0
+    employees: int = 0
     industry: str = ""
     businessDescription: str = ""
     businessStage: str = ""
+
+
+class ModelPredictionRequest(BaseModel):
+    financialRatios: list[float] = Field(min_length=64, max_length=64)
 
 
 class ApplicationRequest(BaseModel):
@@ -390,6 +417,21 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/model/status")
+def model_status():
+    artifact = load_model_artifact()
+    return {"available": bool(artifact), "dataset": artifact.get("dataset") if artifact else None, "target": artifact.get("target") if artifact else None, "testAccuracy": artifact.get("testAccuracy") if artifact else None, "testRecall": artifact.get("testRecall") if artifact else None, "warning": artifact.get("warning") if artifact else "Model artifact is not installed."}
+
+
+@app.post("/api/model/predict")
+def model_predict(request: ModelPredictionRequest, user: User = Depends(require_role("ENTREPRENEUR"))):
+    artifact = load_model_artifact()
+    if not artifact:
+        raise HTTPException(status_code=503, detail="Trained financial model is not available")
+    probability = predict_financial_distress(request.financialRatios, artifact)
+    return {"financialDistressProbability": round(probability, 4), "riskLevel": "High" if probability >= 0.5 else "Moderate" if probability >= 0.25 else "Lower", "model": artifact.get("dataset"), "warning": artifact.get("warning")}
 
 
 @app.get("/api/profile")
@@ -566,7 +608,7 @@ async def grok_assessment(request: AnalysisRequest, deterministic: dict[str, Any
 
 @app.post("/api/entrepreneur/business-analysis")
 async def analyse(request: AnalysisRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
-    if min(request.startupCosts, request.monthlyRevenue, request.monthlyExpenses, request.monthlyGrowthPercent) < 0:
+    if min(request.startupCosts, request.monthlyRevenue, request.monthlyExpenses, request.monthlyGrowthPercent, request.totalAssets, request.totalLiabilities, request.cashOnHand) < 0 or request.customerCount < 0 or request.employees < 0:
         raise HTTPException(status_code=400, detail="Financial values cannot be negative.")
     revenue = float(request.monthlyRevenue); expenses = float(request.monthlyExpenses); startup = float(request.startupCosts); growth = min(float(request.monthlyGrowthPercent), 25.0) / 100; monthly_profit = revenue - expenses
     factors = {"technology": (88, "High", "Technology benefits from continued digital adoption, but competition is strong."), "ai": (92, "Very high", "AI demand is strong, but the proposal must solve a specific customer problem."), "artificial intelligence": (92, "Very high", "AI demand is strong, but the proposal must solve a specific customer problem."), "healthcare": (84, "High", "Healthcare demand is durable, but compliance and trust affect growth."), "agriculture": (78, "High", "Agricultural demand is durable, while weather and input costs create risk."), "education": (76, "High", "Education has durable demand, with affordability and customer acquisition risks."), "manufacturing": (74, "Moderate-high", "Manufacturing can scale through contracts, but working capital matters."), "retail": (65, "Moderate", "Retail depends on pricing, location, repeat customers, and competition."), "tourism": (63, "Moderate", "Tourism is sensitive to seasonality and economic conditions.")}
@@ -590,7 +632,15 @@ async def analyse(request: AnalysisRequest, user: User = Depends(require_role("E
     outlook = "Strong potential" if monthly_profit > 0 and demand_score >= 80 else "Potentially profitable" if monthly_profit > 0 else "Needs improvement"
     confidence = "High" if monthly_profit > 0 and growth > 0 and len(request.businessDescription.strip()) >= 40 else "Medium" if monthly_profit > 0 else "Low"
     horizon = f"about {profitability_month / 12:.1f} years" if profitability_month and profitability_month >= 12 else "within the first year" if profitability_month == 0 else "not reached within the five-year forecast"
-    result = {"outlook": outlook, "summary": f"At the figures supplied, the business is projected to become monthly-profitable {horizon}. The industry demand signal is {demand_level.lower()}, but execution and customer validation remain essential.", "estimatedBreakEvenMonths": break_even, "estimatedProfitabilityMonths": profitability_month, "estimatedMonthlyProfit": round(monthly_profit, 2), "estimatedAnnualProfit": round(monthly_profit * 12, 2), "projectedProfit12Months": round(projected12, 2), "projectedProfit18Months": round(projected18, 2), "projectedProfit24Months": round(projected24, 2), "monthlyExpenses": round(expenses, 2), "demandScore": demand_score, "demandLevel": demand_level, "demandNote": demand_note, "riskFlags": risks, "confidence": confidence, "aiAssessment": None, "aiProvider": "free-rules-engine", "disclaimer": "This is an advisory estimate based on the figures and general industry heuristics you entered. It is not live market research, a funding decision, or a profit guarantee."}
+    liquidity = float(request.cashOnHand) / expenses if expenses > 0 else 0
+    leverage = float(request.totalLiabilities) / float(request.totalAssets) if float(request.totalAssets) > 0 else 0
+    health_score = 50
+    health_score += 20 if monthly_profit > 0 else -20
+    health_score += 10 if liquidity >= 3 else 5 if liquidity >= 1 else -10
+    health_score += 10 if leverage <= 0.5 and float(request.totalAssets) > 0 else -10 if leverage > 1 else 0
+    health_score += 10 if request.customerCount > 10 else 5 if request.customerCount > 0 else -5
+    health_score = max(0, min(100, health_score))
+    result = {"outlook": outlook, "summary": f"At the figures supplied, the business is projected to become monthly-profitable {horizon}. The industry demand signal is {demand_level.lower()}, but execution and customer validation remain essential.", "estimatedBreakEvenMonths": break_even, "estimatedProfitabilityMonths": profitability_month, "estimatedMonthlyProfit": round(monthly_profit, 2), "estimatedAnnualProfit": round(monthly_profit * 12, 2), "projectedProfit12Months": round(projected12, 2), "projectedProfit18Months": round(projected18, 2), "projectedProfit24Months": round(projected24, 2), "monthlyExpenses": round(expenses, 2), "demandScore": demand_score, "demandLevel": demand_level, "demandNote": demand_note, "riskFlags": risks, "confidence": confidence, "financialHealthScore": health_score, "financialRatios": {"liquidityMonths": round(liquidity, 2), "liabilitiesToAssets": round(leverage, 3)}, "financialInputs": {"startupCosts": startup, "monthlyRevenue": revenue, "monthlyExpenses": expenses, "monthlyGrowthPercent": float(request.monthlyGrowthPercent), "totalAssets": float(request.totalAssets), "totalLiabilities": float(request.totalLiabilities), "cashOnHand": float(request.cashOnHand), "customerCount": request.customerCount, "employees": request.employees}, "aiAssessment": None, "aiProvider": "free-rules-engine", "disclaimer": "This is an advisory estimate based on the figures and general industry heuristics you entered. It is not live market research, a funding decision, or a profit guarantee."}
     profile = db.scalar(select(BusinessProfile).where(BusinessProfile.id == request.profileId, BusinessProfile.user_id == user.id)) if request.profileId else db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == user.id).order_by(BusinessProfile.updated_at.desc()))
     if profile: profile.analysis_result = json.dumps(result, default=str); db.commit()
     return result

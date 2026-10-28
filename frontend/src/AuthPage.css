@@ -294,3 +294,21 @@
   .auth-tabs, .account-type-options { grid-template-columns: 1fr; }
   .auth-form button[type="submit"] { width: 100%; }
 }
+
+
+.forgot-link {
+  display: block;
+  margin: 16px auto 0;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: #5142d0;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.forgot-link:hover { text-decoration: underline; }
+.auth-reset-hint { margin: 14px 0 0; color: #777b91; text-align: center; font-size: 13px; line-height: 1.5; }
+.auth-feature > span { font-size: 0; }
+.auth-feature > span::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }

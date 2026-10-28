@@ -9,11 +9,11 @@ import FunderDashboard from "./FunderDashboard";
 import AdminDashboard from "./AdminDashboard";
 
 const menuItems = [
-  { label: "Overview", icon: "▦" },
-  { label: "Business Profile", icon: "◈" },
-  { label: "Find Funding", icon: "⌕" },
-  { label: "My Applications", icon: "▤" },
-  { label: "Messages", icon: "✉" },
+  { label: "Overview", icon: "Overview" },
+  { label: "Business Profile", icon: "Business" },
+  { label: "Find Funding", icon: "Search" },
+  { label: "My Applications", icon: "Applications" },
+  { label: "Messages", icon: "Messages" },
 ];
 
 function pageHash(page) {
@@ -96,25 +96,25 @@ function App() {
             <h1>Build your next opportunity.</h1>
             <p className="subtitle">Manage your business profile, understand your numbers, and find funding that fits your growth plan.</p>
           </div>
-          <button className="primary-button" onClick={() => navigate("Business Profile")}>Complete your profile <span>→</span></button>
+          <button className="primary-button" onClick={() => navigate("Business Profile")}>Complete your profile <span></span></button>
         </section>
 
         <section className="stats-grid dashboard-stats">
-          <div className="stat-card"><div className="stat-top"><span>Funding opportunities</span><span className="stat-icon purple">⌕</span></div><h2>Explore</h2><p>Find programmes matched to your goals</p></div>
-          <div className="stat-card"><div className="stat-top"><span>Business analysis</span><span className="stat-icon blue">↗</span></div><h2>Ready</h2><p>Estimate your path to profitability</p></div>
-          <div className="stat-card"><div className="stat-top"><span>Applications</span><span className="stat-icon green">▤</span></div><h2>Track</h2><p>Follow every submitted application</p></div>
+          <div className="stat-card"><div className="stat-top"><span>Funding opportunities</span><span className="stat-icon purple"></span></div><h2>Explore</h2><p>Find programmes matched to your goals</p></div>
+          <div className="stat-card"><div className="stat-top"><span>Business analysis</span><span className="stat-icon blue"></span></div><h2>Ready</h2><p>Estimate your path to profitability</p></div>
+          <div className="stat-card"><div className="stat-top"><span>Applications</span><span className="stat-icon green"></span></div><h2>Track</h2><p>Follow every submitted application</p></div>
         </section>
 
         <section className="dashboard-grid">
           <div className="content-panel dashboard-panel">
             <div className="panel-heading"><div><p className="eyebrow">YOUR WORKSPACE</p><h3>What would you like to do?</h3></div></div>
             <div className="action-grid">
-              <button className="action-card" onClick={() => navigate("Business Profile")}><span className="action-icon purple">◈</span><strong>Build your profile</strong><small>Tell funders about your business and funding needs.</small><span className="action-arrow">→</span></button>
-              <button className="action-card" onClick={() => navigate("Find Funding")}><span className="action-icon blue">⌕</span><strong>Find funding</strong><small>Explore active programmes and eligibility requirements.</small><span className="action-arrow">→</span></button>
-              <button className="action-card" onClick={() => navigate("My Applications")}><span className="action-icon green">▤</span><strong>Track applications</strong><small>Review the funding applications you have submitted.</small><span className="action-arrow">→</span></button>
+              <button className="action-card" onClick={() => navigate("Business Profile")}><span className="action-icon purple"></span><strong>Build your profile</strong><small>Tell funders about your business and funding needs.</small><span className="action-arrow"></span></button>
+              <button className="action-card" onClick={() => navigate("Find Funding")}><span className="action-icon blue"></span><strong>Find funding</strong><small>Explore active programmes and eligibility requirements.</small><span className="action-arrow"></span></button>
+              <button className="action-card" onClick={() => navigate("My Applications")}><span className="action-icon green"></span><strong>Track applications</strong><small>Review the funding applications you have submitted.</small><span className="action-arrow"></span></button>
             </div>
           </div>
-          <div className="content-panel insight-panel"><span className="insight-mark">✦</span><p className="eyebrow">FUNDING READINESS</p><h3>Strong proposals start with clear numbers.</h3><p>Complete your profile and run the business analysis to prepare a clearer funding story.</p><button className="secondary-button" onClick={() => navigate("Business Profile")}>Analyse my proposal →</button></div>
+          <div className="content-panel insight-panel"><span className="insight-mark"></span><p className="eyebrow">FUNDING READINESS</p><h3>Strong proposals start with clear numbers.</h3><p>Complete your profile and run the business analysis to prepare a clearer funding story.</p><button className="secondary-button" onClick={() => navigate("Business Profile")}>Analyse my proposal </button></div>
         </section>
       </div>
     );
@@ -144,6 +144,8 @@ function RolePage({ user, onLogout, children }) {
 }
 
 export default App;
+
+
 
 
 

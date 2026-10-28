@@ -160,7 +160,7 @@ export default function AuthPage({ onLogin }) {
           </p>
 
           <div className="auth-feature">
-            <span>✓</span>
+            <span aria-hidden="true"></span>
             <div>
               <strong>One business profile</strong>
               <p>Present your business and funding needs.</p>
@@ -168,7 +168,7 @@ export default function AuthPage({ onLogin }) {
           </div>
 
           <div className="auth-feature">
-            <span>✓</span>
+            <span aria-hidden="true"></span>
             <div>
               <strong>Funding opportunities</strong>
               <p>Explore programmes that fit your goals.</p>
@@ -177,7 +177,7 @@ export default function AuthPage({ onLogin }) {
         </div>
 
         <p className="auth-copyright">
-          FundBridge · Helping businesses connect with funding.
+          FundBridge - Helping businesses connect with funding.
         </p>
       </section>
 
@@ -316,9 +316,10 @@ export default function AuthPage({ onLogin }) {
               {loading
                 ? "Please wait..."
                 : mode === "login"
-                  ? "Log in to FundBridge →"
-                  : mode === "forgot" ? (otpSent ? "Reset password →" : "Email me a reset code →")
-                  : "Create entrepreneur account →"}
+                  ? "Log in to FundBridge"
+                  : mode === "forgot" ? (otpSent ? "Reset password" : "Send reset code")
+                  : mode === "register" && verificationSent ? "Verify email"
+                  : "Create entrepreneur account"}
             </button>
           </form>
 
@@ -342,6 +343,11 @@ export default function AuthPage({ onLogin }) {
     </main>
   );
 }
+
+
+
+
+
 
 
 

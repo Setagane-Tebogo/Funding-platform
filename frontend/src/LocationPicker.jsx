@@ -5,10 +5,8 @@ import markerIconRetina from "leaflet/dist/images/marker-icon-2x.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import "leaflet/dist/leaflet.css";
 import "./LocationPicker.css";
+import { API_BASE_URL as API } from "./apiBase.js";
 
-const API = window.location.hostname === "localhost"
-  ? (import.meta.env.VITE_API_URL || "http://localhost:8080")
-  : "https://funding-platform-4vyt.onrender.com";
 const DEFAULT_CENTER = [-29.0, 24.0];
 let lastDirectGeocodeAt = 0;
 const directGeocodeCache = new Map();
@@ -82,7 +80,14 @@ export default function LocationPicker({ value, onChange }) {
     url.searchParams.set("countrycodes", "za"); url.searchParams.set("q", text.trim());
     const contact = import.meta.env.VITE_GEOCODER_CONTACT;
     if (contact) url.searchParams.set("email", contact);
-    const response = await fetch(url, { headers: { Accept: "application/json" } });
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15000);
+    let response;
+    try {
+      response = await fetch(url, { headers: { Accept: "application/json" }, signal: controller.signal });
+    } finally {
+      window.clearTimeout(timeout);
+    }
     lastDirectGeocodeAt = Date.now();
     if (!response.ok) throw new Error("Place search is temporarily unavailable. Try again or click the map to set the pin.");
     const rows = await response.json();
@@ -100,17 +105,25 @@ export default function LocationPicker({ value, onChange }) {
       let data;
       try {
         const token = sessionStorage.getItem("token");
-        const response = await fetch(`${API}/api/entrepreneur/location-search?q=${encodeURIComponent(text)}`, {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 12000);
+        let response;
+        try {
+          response = await fetch(`${API}/api/entrepreneur/location-search?q=${encodeURIComponent(text)}`, {
           headers: { Authorization: `Bearer ${token}` },
-        });
+            signal: controller.signal,
+          });
+        } finally {
+          window.clearTimeout(timeout);
+        }
         if (response.ok) data = await response.json();
-        else if ([404, 502, 503, 504].includes(response.status)) data = await directPlaceSearch(text);
+        else if ([408, 429, 500, 502, 503, 504].includes(response.status)) data = await directPlaceSearch(text);
         else {
           const errorData = await response.json().catch(() => null);
           throw new Error(errorData?.detail || `Place search failed (HTTP ${response.status}).`);
         }
       } catch (apiError) {
-        if (apiError instanceof TypeError) data = await directPlaceSearch(text);
+        if (apiError instanceof TypeError || apiError.name === "AbortError") data = await directPlaceSearch(text);
         else throw apiError;
       }
       if (!Array.isArray(data) || data.length === 0) throw new Error("No places found in South Africa. Try adding the suburb, town, or province.");

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import "./BusinessProfile.css";
 import LocationPicker from "./LocationPicker.jsx";
-const API = window.location.hostname === "localhost" ? (import.meta.env.VITE_API_URL || "http://localhost:8080") : "https://funding-platform-4vyt.onrender.com";
+import { API_BASE_URL as API } from "./apiBase.js";
 const BUSINESS_TYPE_GROUPS = {
   "Retail": [["grocery", "Convenience or grocery store"], ["clothing", "Clothing or fashion shop"], ["electronics", "Electronics or mobile phone shop"], ["other", "Other retail business"]],
   "Food and hospitality": [["restaurant", "Restaurant or takeaway"], ["cafe", "Cafe or coffee shop"], ["bakery", "Bakery or confectionery"], ["catering", "Catering or food service"], ["other", "Other food business"]],

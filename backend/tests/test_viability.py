@@ -53,31 +53,31 @@ class ViabilityAssessmentTests(unittest.TestCase):
         strong_location = {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 200, "relevantAnchors": 10, "nearbyTransitFeatures": 10, "competitorCount": 0}
         result = build_business_viability(values, strong_location)
         self.assertLessEqual(result["score"], 39)
-        self.assertGreater(result["weightedScoreBeforeRiskCaps"], result["score"])
-        self.assertEqual(result["band"], "High risk")
-        self.assertIn("show a loss", result["scoreCap"]["reasons"][0])
+        self.assertGreater(result["weightedScoreBeforeRiskAdjustments"], result["score"])
+        self.assertIn(result["band"], {"High risk", "Very high risk"})
+        self.assertIn("higher than revenue", result["scoreAdjustment"]["reasons"][0])
 
     def test_break_even_and_underfunded_projections_receive_score_limits(self):
         break_even = build_business_viability({**BASE, "monthlyRevenue": 50000, "monthlyExpenses": 50000}, {})
         underfunded = build_business_viability({**BASE, "availableCapital": 1000, "fundingRequired": 1000}, {})
         self.assertLessEqual(break_even["score"], 49)
         self.assertLessEqual(underfunded["score"], 59)
-        self.assertTrue(break_even["scoreCap"]["applied"])
-        self.assertTrue(underfunded["scoreCap"]["applied"])
+        self.assertTrue(break_even["scoreAdjustment"]["applied"])
+        self.assertTrue(underfunded["scoreAdjustment"]["applied"])
 
     def test_missing_monthly_financials_cannot_receive_a_strong_score(self):
         values = {**BASE, "providedInputs": ["startupCosts", "availableCapital", "fundingRequired"]}
         strong_location = {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 200, "relevantAnchors": 10, "nearbyTransitFeatures": 10, "competitorCount": 0}
         result = build_business_viability(values, strong_location)
         self.assertLessEqual(result["score"], 64)
-        self.assertTrue(result["scoreCap"]["applied"])
-        self.assertIn("incomplete", result["scoreCap"]["reasons"][0])
+        self.assertTrue(result["scoreAdjustment"]["applied"])
+        self.assertIn("incomplete", result["scoreAdjustment"]["reasons"][0])
 
     def test_zero_expenses_do_not_produce_a_strong_profitability_score(self):
         values = {**BASE, "monthlyRevenue": 90000, "monthlyExpenses": 0}
         result = build_business_viability(values, {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 200, "relevantAnchors": 10, "nearbyTransitFeatures": 10, "competitorCount": 0})
         self.assertLessEqual(result["score"], 49)
-        self.assertIn("Monthly expenses are entered as zero", " ".join(result["scoreCap"]["reasons"]))
+        self.assertIn("No monthly expenses were entered", " ".join(result["scoreAdjustment"]["reasons"]))
         self.assertTrue(any("No monthly operating expenses" in risk for risk in result["risks"]))
 
     def test_missing_financials_use_neutral_score_and_reduce_confidence(self):

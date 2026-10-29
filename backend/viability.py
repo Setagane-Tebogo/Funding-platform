@@ -541,30 +541,33 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
             "riskResilience": "Risk management and resilience",
         }[key], "weight": weight, "score": round(score), "contribution": round(score * weight / 100, 2), "explanation": explanation})
     weighted_score = max(0, min(100, round(sum(item["contribution"] for item in categories))))
-    score_cap = 100
-    score_cap_reasons = []
+    risk_factor = 1.0
+    score_adjustment_reasons = []
     if not financial_provided:
-        score_cap = min(score_cap, 64)
-        score_cap_reasons.append("Monthly revenue and expenses are incomplete, so strong profitability cannot be confirmed.")
+        risk_factor *= 0.75
+        score_adjustment_reasons.append("Monthly revenue and expenses are incomplete, so profitability cannot be confirmed.")
     elif monthly_profit < 0:
-        score_cap = min(score_cap, 39)
-        score_cap_reasons.append(f"The entered monthly figures show a loss of R{abs(monthly_profit):,.2f}.")
+        loss_ratio = abs(monthly_profit) / max(revenue, 1)
+        risk_factor *= max(0.1, 0.5 - loss_ratio)
+        score_adjustment_reasons.append("The entered monthly figures show expenses higher than revenue.")
     elif monthly_profit == 0:
-        score_cap = min(score_cap, 49)
-        score_cap_reasons.append("The entered monthly figures only break even and do not show profit.")
+        risk_factor *= 0.49
+        score_adjustment_reasons.append("The entered monthly figures break even and do not show a profit.")
     elif profit_margin is not None and 0 < profit_margin < 0.05:
-        score_cap = min(score_cap, 64)
-        score_cap_reasons.append("The entered profit margin is below 5%, leaving little room for unlisted costs or sales changes.")
+        risk_factor *= 0.65 + 0.25 * (profit_margin / 0.05)
+        score_adjustment_reasons.append("The entered profit margin is very thin, leaving little room for unlisted costs or sales changes.")
     if financial_provided and revenue > 0 and expenses <= 0:
-        score_cap = min(score_cap, 49)
-        score_cap_reasons.append("Monthly expenses are entered as zero; rent, stock, wages, utilities, transport, or other costs may be missing.")
+        risk_factor *= 0.49
+        score_adjustment_reasons.append("No monthly expenses were entered, so the apparent profit may be overstated.")
     if capital_complete and funding_gap > 0:
-        score_cap = min(score_cap, 59)
-        score_cap_reasons.append(f"The entered available capital and funding leave a startup-cost gap of R{funding_gap:,.2f}.")
+        gap_ratio = min(1.0, funding_gap / max(startup, 1))
+        risk_factor *= max(0.5, 1 - 0.4 * gap_ratio)
+        score_adjustment_reasons.append("Entered capital and funding do not cover the full startup cost.")
     if _present(values, "availableCapital") and expenses > 0 and available / expenses < 1:
-        score_cap = min(score_cap, 59)
-        score_cap_reasons.append("Available capital covers less than one month of the entered operating expenses.")
-    overall = min(weighted_score, score_cap)
+        runway = max(0.0, available / expenses)
+        risk_factor *= 0.75 + 0.25 * runway
+        score_adjustment_reasons.append("Available capital does not cover a full month of the entered operating expenses.")
+    overall = round(weighted_score * risk_factor)
     band = "Strong potential" if overall >= 80 else "Promising, with areas to improve" if overall >= 65 else "Moderate potential, significant risks present" if overall >= 50 else "High risk" if overall >= 30 else "Very high risk"
 
     missing = []
@@ -652,8 +655,8 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
         "location": values.get("location") or "",
         "businessStage": values.get("businessStage") or "",
         "score": overall,
-        "weightedScoreBeforeRiskCaps": weighted_score,
-        "scoreCap": {"applied": score_cap < weighted_score, "maximum": score_cap if score_cap < 100 else None, "reasons": score_cap_reasons},
+        "weightedScoreBeforeRiskAdjustments": weighted_score,
+        "scoreAdjustment": {"applied": bool(score_adjustment_reasons) and overall < weighted_score, "reasons": score_adjustment_reasons},
         "band": band,
         "prediction": prediction,
         "predictionDisclaimer": "Indicative screening result, not a statistical probability or guarantee of profitability.",

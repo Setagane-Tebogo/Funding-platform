@@ -191,6 +191,7 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
     competitors = int(location.get("competitorCount") or location.get("nearbyTypeListingsCount") or 0)
     anchors = int(location.get("relevantAnchors") or 0)
     mapped_features = int(location.get("mappedFeatureCount") or 0)
+    radius_meters = int(location.get("radiusMeters") or 5000)
     map_available = location.get("status") not in {None, "unavailable"}
     map_context = bool(
         map_available
@@ -205,8 +206,8 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
     stage = str(values.get("businessStage") or "").casefold()
     industry_aligned = location.get("industryAlignedWithBusinessType") is not False
 
-    # Location is based on mapped context for this business type: nearby customer/activity
-    # anchors and transit access raise the score; dense same-type competition lowers it.
+    # Location is based on pin-specific mapped context: local activity density, relevant
+    # anchors, and transit access raise the score; dense same-type competition lowers it.
     # Sparse/unavailable data stays neutral, especially for rural areas. OSM does not prove
     # customer demand, purchasing power, safety, or infrastructure reliability.
     if not map_context:
@@ -224,12 +225,13 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
             location_reason = "Reliable nearby map context was unavailable or too sparse, so location remains neutral; missing map data does not count this against urban or rural locations. The score cannot infer local demand without mapped evidence."
     else:
         transit = int(location.get("nearbyTransitFeatures") or 0)
-        anchor_points = min(30, anchors * 5)
-        access_points = min(15, transit * 3)
+        density_points = min(15, max(0, (mapped_features - 4) // 10 * 3))
+        anchor_points = min(20, anchors * 4)
+        access_points = min(10, transit * 2)
         competition_adjustment = -15 if competitors >= 8 else -7 if competitors >= 4 else 3 if competitors > 0 else 0
-        location_score = _clamp(50 + anchor_points + access_points + competition_adjustment)
+        location_score = _clamp(50 + density_points + anchor_points + access_points + competition_adjustment)
         location_reason = (
-            f"At this pin, OpenStreetMap returned {mapped_features} mapped feature(s), including "
+            f"Within {radius_meters:,} m of this pin, OpenStreetMap returned {mapped_features} mapped feature(s), including "
             f"{anchors} context anchor(s) relevant to {values.get('businessType') or 'this business type'} "
             f"and {transit} transit feature(s). {competitors} similar mapped business(es) "
             f"{'lower the location score because of a competition signal' if competitors >= 4 else 'provide a limited market-presence signal' if competitors else 'were returned'}; "

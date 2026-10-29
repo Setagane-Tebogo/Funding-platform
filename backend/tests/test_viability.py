@@ -81,6 +81,14 @@ class ViabilityAssessmentTests(unittest.TestCase):
         self.assertGreater(few_score, many_score)
         self.assertIn("competition only", many_listings["locationEvidence"]["summary"])
 
+    def test_mapped_activity_density_changes_location_and_overall_scores(self):
+        low_activity = build_business_viability(BASE, {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 8, "relevantAnchors": 1, "nearbyTransitFeatures": 0, "competitorCount": 0})
+        high_activity = build_business_viability(BASE, {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 80, "relevantAnchors": 1, "nearbyTransitFeatures": 0, "competitorCount": 0})
+        low_location = next(item["score"] for item in low_activity["categoryScores"] if item["key"] == "locationMarket")
+        high_location = next(item["score"] for item in high_activity["categoryScores"] if item["key"] == "locationMarket")
+        self.assertGreater(high_location, low_location)
+        self.assertGreater(high_activity["score"], low_activity["score"])
+
     def test_zero_or_negative_monthly_profit_is_reported_as_high_risk(self):
         values = {**BASE, "monthlyRevenue": 20000, "monthlyExpenses": 20000}
         result = build_business_viability(values, {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 8, "relevantAnchors": 4, "competitorCount": 2})

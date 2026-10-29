@@ -62,6 +62,30 @@ class ViabilityAssessmentTests(unittest.TestCase):
         self.assertEqual(location["score"], 50)
         self.assertIn("does not count this against", location["explanation"])
 
+    def test_location_and_business_type_change_the_score(self):
+        weak_location = {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 24, "relevantAnchors": 0, "nearbyTransitFeatures": 0, "competitorCount": 12}
+        strong_location = {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 24, "relevantAnchors": 6, "nearbyTransitFeatures": 4, "competitorCount": 1}
+        weak = build_business_viability(BASE, weak_location)
+        strong = build_business_viability(BASE, strong_location)
+        weak_score = next(item["score"] for item in weak["categoryScores"] if item["key"] == "locationMarket")
+        strong_score = next(item["score"] for item in strong["categoryScores"] if item["key"] == "locationMarket")
+        self.assertLess(weak_score, strong_score)
+        self.assertLess(weak["score"], strong["score"])
+        self.assertIn("competition signal", next(item["explanation"] for item in weak["categoryScores"] if item["key"] == "locationMarket"))
+
+    def test_partial_place_search_still_changes_location_score_on_competition_evidence(self):
+        few_listings = build_business_viability(BASE, {"status": "partial_geocoder", "contextDataAvailable": False, "nearbyTypeListingsCount": 2})
+        many_listings = build_business_viability(BASE, {"status": "partial_geocoder", "contextDataAvailable": False, "nearbyTypeListingsCount": 9})
+        few_score = next(item["score"] for item in few_listings["categoryScores"] if item["key"] == "locationMarket")
+        many_score = next(item["score"] for item in many_listings["categoryScores"] if item["key"] == "locationMarket")
+        self.assertGreater(few_score, many_score)
+        self.assertIn("competition only", many_listings["locationEvidence"]["summary"])
+
+    def test_zero_or_negative_monthly_profit_is_reported_as_high_risk(self):
+        values = {**BASE, "monthlyRevenue": 20000, "monthlyExpenses": 20000}
+        result = build_business_viability(values, {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 8, "relevantAnchors": 4, "competitorCount": 2})
+        self.assertEqual(result["prediction"], "High risk of not becoming profitable")
+
     def test_industry_guidance_varies_by_sector(self):
         agriculture = build_business_viability({**BASE, "businessTypeCategory": "agriculture"}, {})
         restaurant = build_business_viability({**BASE, "businessTypeCategory": "restaurant"}, {})

@@ -319,3 +319,9 @@
   .viability-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .viability-two-column { grid-template-columns: 1fr; }
 }
+.assessment-extra-fields,
+.viability-categories,
+.viability-history,
+.viability-sources {
+  display: none !important;
+}

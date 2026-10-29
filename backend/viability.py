@@ -192,7 +192,12 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
     anchors = int(location.get("relevantAnchors") or 0)
     mapped_features = int(location.get("mappedFeatureCount") or 0)
     map_available = location.get("status") not in {None, "unavailable"}
-    map_context = bool(map_available and location.get("contextDataAvailable") is not False and mapped_features > 0)
+    map_context = bool(
+        map_available
+        and location.get("contextDataAvailable") is not False
+        and mapped_features > 0
+        and location.get("status") != "limited_data"
+    )
     target_market = str(values.get("targetMarket") or "").strip()
     experience = str(values.get("businessExperience") or experience_fallback or "").strip()
     operations_plan = str(values.get("operationsPlan") or "").strip()
@@ -200,15 +205,36 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
     stage = str(values.get("businessStage") or "").casefold()
     industry_aligned = location.get("industryAlignedWithBusinessType") is not False
 
-    # Location is based on relevant mapped anchors and category-specific access proxies.
-    # No population, purchasing-power, safety, or infrastructure claim is inferred from OSM.
+    # Location is based on mapped context for this business type: nearby customer/activity
+    # anchors and transit access raise the score; dense same-type competition lowers it.
+    # Sparse/unavailable data stays neutral, especially for rural areas. OSM does not prove
+    # customer demand, purchasing power, safety, or infrastructure reliability.
     if not map_context:
-        location_score = 50
-        location_reason = "Nearby map context is missing or incomplete; the neutral score does not count this against urban or rural locations."
+        if map_available and competitors > 0:
+            competition_adjustment = -15 if competitors >= 8 else -7 if competitors >= 4 else 3
+            location_score = _clamp(50 + competition_adjustment)
+            location_reason = (
+                f"The location lookup returned {competitors} named listing(s) matching this business type, "
+                "which provides a limited competition signal for this pin. Nearby customer activity and access "
+                "could not be verified, so the score reflects competition only; incomplete rural or urban map "
+                "coverage is not proof of low demand."
+            )
+        else:
+            location_score = 50
+            location_reason = "Reliable nearby map context was unavailable or too sparse, so location remains neutral; missing map data does not count this against urban or rural locations. The score cannot infer local demand without mapped evidence."
     else:
-        access = min(12, int(location.get("nearbyTransitFeatures") or 0) * 3)
-        location_score = _clamp(50 + min(35, anchors * 4) + access)
-        location_reason = f"OpenStreetMap returned {mapped_features} mapped feature(s), including {anchors} features relevant to this business type and {int(location.get('nearbyTransitFeatures') or 0)} transit feature(s). These are local context proxies, not customer counts."
+        transit = int(location.get("nearbyTransitFeatures") or 0)
+        anchor_points = min(30, anchors * 5)
+        access_points = min(15, transit * 3)
+        competition_adjustment = -15 if competitors >= 8 else -7 if competitors >= 4 else 3 if competitors > 0 else 0
+        location_score = _clamp(50 + anchor_points + access_points + competition_adjustment)
+        location_reason = (
+            f"At this pin, OpenStreetMap returned {mapped_features} mapped feature(s), including "
+            f"{anchors} context anchor(s) relevant to {values.get('businessType') or 'this business type'} "
+            f"and {transit} transit feature(s). {competitors} similar mapped business(es) "
+            f"{'lower the location score because of a competition signal' if competitors >= 4 else 'provide a limited market-presence signal' if competitors else 'were returned'}; "
+            "these map indicators are incomplete proxies, not customer counts, spending data, or proof of profit."
+        )
     if not industry_aligned:
         location_score = min(location_score, 30)
         location_reason += " The selected industry and business type may not match."
@@ -338,9 +364,15 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
     completeness = round(completed * 100 / len(field_checks))
     confidence = "Moderate" if completeness >= 70 and map_context else "Limited" if completeness < 40 or not map_context else "Low"
 
-    if overall >= 80 and financial_provided and monthly_profit > 0:
+    if financial_provided and monthly_profit < 0:
+        prediction = "High risk of not becoming profitable"
+    elif financial_provided and monthly_profit == 0:
+        prediction = "High risk of not becoming profitable"
+    elif location_score < 40 and market_score < 40:
+        prediction = "High risk of not becoming profitable"
+    elif overall >= 80 and financial_provided and monthly_profit > 0:
         prediction = "Likely to be profitable"
-    elif overall < 50 or (financial_provided and monthly_profit < 0):
+    elif overall < 50:
         prediction = "High risk of not becoming profitable"
     else:
         prediction = "Potentially profitable with improvements"
@@ -400,7 +432,7 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
         "categoryScores": categories,
         "financials": {"monthlyRevenue": revenue if _present(values, "monthlyRevenue") else None, "monthlyExpenses": expenses if _present(values, "monthlyExpenses") else None, "monthlyProfit": monthly_profit if financial_provided else None, "profitMarginPercent": round(profit_margin * 100, 2) if profit_margin is not None else None, "startupCosts": startup if _present(values, "startupCosts") else None, "availableCapital": available if _present(values, "availableCapital") else None, "fundingRequired": funding if _present(values, "fundingRequired") else None, "fundingGap": round(funding_gap, 2) if capital_complete else None, "breakEvenMonths": startup_payback_months},
         "sectorGuidance": sector,
-        "locationEvidence": {"status": location.get("status", "unavailable"), "source": location.get("source", "OpenStreetMap services"), "radiusMeters": location.get("radiusMeters"), "mappedFeatureCount": mapped_features if map_available else None, "similarBusinessCount": competitors if map_available else None, "relevantContextCount": anchors if map_available else None, "summary": location_reason, "coverageNote": location.get("coverageNote", "Nearby map data could not be retrieved; no live local statistics are available.")},
+        "locationEvidence": {"status": location.get("status", "unavailable"), "score": round(location_score), "scoreWeight": CATEGORY_WEIGHTS["locationMarket"], "source": location.get("source", "OpenStreetMap services"), "radiusMeters": location.get("radiusMeters"), "mappedFeatureCount": mapped_features if map_available else None, "similarBusinessCount": competitors if map_available else None, "relevantContextCount": anchors if map_available else None, "summary": location_reason, "coverageNote": location.get("coverageNote", "Nearby map data could not be retrieved; no live local statistics are available.")},
         "strengths": strengths,
         "risks": risks,
         "recommendations": list(dict.fromkeys(recommendations)),

@@ -197,8 +197,8 @@ export default function AuthPage({ onLogin }) {
 
           <p className="auth-intro">
             {mode === "login"
-              ? "Log in to continue to your FundBridge workspace."
-              : mode === "forgot" ? "Recover access to your FundBridge workspace."
+              ? "Log in to continue to FundBridge."
+              : mode === "forgot" ? "Recover access to your FundBridge account."
               : "Create an account to start your funding journey."}
           </p>
 
@@ -343,7 +343,6 @@ export default function AuthPage({ onLogin }) {
     </main>
   );
 }
-
 
 
 

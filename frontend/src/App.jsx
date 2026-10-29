@@ -173,11 +173,11 @@ function App() {
       {menuOpen && <button type="button" className="sidebar-backdrop" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
       <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
         <button className="brand brand-button" onClick={() => navigate("Overview")} aria-label="Go to dashboard"><img src="/fundbridge-logo-transparent.png" alt="FundBridge" className="sidebar-logo" /></button>
-        <p className="nav-label">Workspace</p>
+        <p className="nav-label">FundBridge</p>
         <nav>{menuItems.map((item) => <button key={item.label} className={`nav-item ${activePage === item.label ? "active" : ""}`} onClick={() => navigate(item.label)}><span className="nav-icon"><NavigationIcon name={item.icon} /></span>{item.label}</button>)}</nav>
       </aside>
       <main className="main-content">
-        <header className="topbar"><div className="topbar-title"><button type="button" className="menu-toggle" aria-label={menuOpen ? "Close navigation" : "Open navigation"} onClick={() => setMenuOpen((open) => !open)}><span></span><span></span><span></span></button><div><span className="breadcrumb">Workspace /</span><strong> {activePage}</strong></div></div><div className="user-menu"><button type="button" className="profile-top-button" onClick={() => navigate("Profile")}><div className="avatar">{accountProfile?.avatar ? <img src={accountProfile.avatar} alt="Profile" /> : (user.name || user.email || "U").slice(0, 2).toUpperCase()}</div><span><strong>{accountProfile?.name || user.name || "Entrepreneur"}</strong><small>{user.email}</small></span></button><button type="button" className="logout-button" onClick={handleLogout}>Log out</button></div></header>
+        <header className="topbar"><div className="topbar-title"><button type="button" className="menu-toggle" aria-label={menuOpen ? "Close navigation" : "Open navigation"} onClick={() => setMenuOpen((open) => !open)}><span></span><span></span><span></span></button><div><span className="breadcrumb">FundBridge /</span><strong> {activePage}</strong></div></div><div className="user-menu"><button type="button" className="profile-top-button" onClick={() => navigate("Profile")}><div className="avatar">{accountProfile?.avatar ? <img src={accountProfile.avatar} alt="Profile" /> : (user.name || user.email || "U").slice(0, 2).toUpperCase()}</div><span><strong>{accountProfile?.name || user.name || "Entrepreneur"}</strong><small>{user.email}</small></span></button><button type="button" className="logout-button" onClick={handleLogout}>Log out</button></div></header>
         <section className="page-content">{renderPage()}</section>
       </main>
     </div>
@@ -230,7 +230,7 @@ function RolePage({ user, profile, onLogout, children }) {
         <button className="brand brand-button" onClick={() => navigate(defaultView)} aria-label="Go to dashboard">
           <img src="/fundbridge-logo-transparent.png" alt="FundBridge" className="sidebar-logo" />
         </button>
-        <p className="nav-label">{user.role === "ADMIN" ? "Administration" : "Organisation workspace"}</p>
+        <p className="nav-label">{user.role === "ADMIN" ? "Administration" : "FundBridge"}</p>
         <nav>
           {navigationItems.map((item) => (
             <button
@@ -254,7 +254,7 @@ function RolePage({ user, profile, onLogout, children }) {
             <button type="button" className="menu-toggle" aria-label={menuOpen ? "Close navigation" : "Open navigation"} onClick={() => setMenuOpen((open) => !open)}>
               <span></span><span></span><span></span>
             </button>
-            <div><span className="breadcrumb">Workspace /</span><strong> {showProfile ? "My profile" : activeItem?.label}</strong></div>
+            <div><span className="breadcrumb">FundBridge /</span><strong> {showProfile ? "My profile" : activeItem?.label}</strong></div>
           </div>
           <div className="user-menu">
             <button type="button" className="profile-top-button" onClick={() => { setShowProfile(true); setMenuOpen(false); }}>

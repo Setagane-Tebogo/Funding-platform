@@ -225,8 +225,8 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
 
     # Location is based on pin-specific mapped context: local activity density, relevant
     # anchors, and transit access raise the score; dense same-type competition lowers it.
-    # Sparse/unavailable data stays neutral, especially for rural areas. OSM does not prove
-    # customer demand, purchasing power, safety, or infrastructure reliability.
+    # Sparse evidence can influence the score cautiously, but never increases confidence.
+    # OSM does not prove customer demand, purchasing power, safety, or infrastructure.
     if not map_context:
         settlement_adjustment = 0
         urban_service_types = {"grocery", "clothing", "restaurant", "cafe", "salon", "laundry", "tailoring", "health", "education", "electronics", "professional", "automotive", "carwash"}
@@ -237,7 +237,18 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
             settlement_adjustment = 8
         elif settlement_class == "rural" and category in urban_service_types:
             settlement_adjustment = -5
-        if map_available and competitors > 0:
+        if map_available and mapped_features > 0:
+            sparse_anchor_points = min(8, anchors * 4)
+            sparse_access_points = min(4, int(location.get("nearbyTransitFeatures") or 0) * 2)
+            competition_adjustment = -12 if competitors >= 8 else -6 if competitors >= 4 else 3 if competitors > 0 else 0
+            location_score = _clamp(50 + settlement_adjustment + sparse_anchor_points + sparse_access_points + competition_adjustment)
+            location_reason = (
+                f"Only {mapped_features} nearby mapped feature(s) were returned within {radius_meters:,} m, including "
+                f"{anchors} business-relevant anchor(s), {int(location.get('nearbyTransitFeatures') or 0)} transit feature(s), "
+                f"and {competitors} matching business(es). This sparse evidence adjusts the location score cautiously; "
+                "it is not a complete picture of the area and does not verify customer demand."
+            )
+        elif map_available and competitors > 0:
             competition_adjustment = -15 if competitors >= 8 else -7 if competitors >= 4 else 3
             location_score = _clamp(50 + settlement_adjustment + competition_adjustment)
             location_reason = (

@@ -89,6 +89,15 @@ class ViabilityAssessmentTests(unittest.TestCase):
         self.assertGreater(high_location, low_location)
         self.assertGreater(high_activity["score"], low_activity["score"])
 
+    def test_sparse_map_evidence_changes_score_without_claiming_full_confidence(self):
+        sparse = build_business_viability(BASE, {"status": "limited_data", "contextDataAvailable": True, "mappedFeatureCount": 1, "relevantAnchors": 1, "nearbyTransitFeatures": 0, "competitorCount": 0})
+        no_data = build_business_viability(BASE, {"status": "unavailable", "contextDataAvailable": False})
+        sparse_location = next(item["score"] for item in sparse["categoryScores"] if item["key"] == "locationMarket")
+        no_data_location = next(item["score"] for item in no_data["categoryScores"] if item["key"] == "locationMarket")
+        self.assertGreater(sparse_location, no_data_location)
+        self.assertEqual(sparse["confidence"], "Limited")
+        self.assertIn("sparse evidence", sparse["locationEvidence"]["summary"])
+
     def test_settlement_type_fallback_changes_score_by_industry(self):
         rural_site = build_business_viability(BASE, {"status": "partial_location", "contextDataAvailable": False, "settlementClass": "rural", "localityLabel": "Mokopane outskirts"})
         town_site = build_business_viability(BASE, {"status": "partial_location", "contextDataAvailable": False, "settlementClass": "urban_or_town", "localityLabel": "Polokwane"})

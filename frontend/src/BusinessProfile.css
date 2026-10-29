@@ -267,3 +267,8 @@
     width: 100%;
   }
 }
+
+.analysis-disclaimer { color: #59665d; font-size: 13px; line-height: 1.55; }
+.financial-estimate h3 { margin-top: 0; }
+
+.location-type-warning { padding: 10px; border-radius: 7px; color: #755300; background: #fff5d8; }

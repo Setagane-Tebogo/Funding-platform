@@ -102,10 +102,10 @@ export default function LocationPicker({ value, onChange }) {
   return <div className="location-picker">
     <label className="location-search-label" htmlFor="business-location-search">Business location *</label>
     <p className="location-help">Search for an address or place, choose a result, or click the map. Drag the pin to adjust it.</p>
-    <form className="location-search" onSubmit={search}>
-      <input id="business-location-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search suburb, town, or street address" autoComplete="street-address" />
-      <button type="submit" disabled={searching}>{searching ? "Searching…" : "Search places"}</button>
-    </form>
+    <div className="location-search">
+      <input id="business-location-search" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); search(event); } }} placeholder="Search suburb, town, or street address" autoComplete="street-address" />
+      <button type="button" onClick={search} disabled={searching}>{searching ? "Searching…" : "Search places"}</button>
+    </div>
     {results.length > 0 && <ul className="location-search-results" aria-label="Place search results">{results.map((result) => <li key={result.id}><button type="button" onClick={() => chooseResult(result)}>{result.label}</button></li>)}</ul>}
     <div ref={mapElement} className="location-map" role="application" aria-label="Interactive map. Click to choose a business location." />
     {value?.location && <p className="selected-location"><strong>Selected:</strong> {value.location} ({Number(value.latitude).toFixed(5)}, {Number(value.longitude).toFixed(5)})</p>}

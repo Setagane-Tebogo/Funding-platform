@@ -260,6 +260,9 @@ class AnalysisRequest(BaseModel):
     customerCount: int = 0
     employees: int = 0
     industry: str = ""
+    businessType: str = ""
+    businessTypeCategory: str = "other"
+    customBusinessType: str = ""
     businessDescription: str = ""
     businessStage: str = ""
     latitude: Optional[float] = Field(default=None, ge=-90, le=90)
@@ -270,6 +273,8 @@ class LocationAnalysisRequest(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     industry: str = Field(min_length=1, max_length=255)
+    businessType: str = Field(min_length=1, max_length=255)
+    businessTypeCategory: str = "other"
     radiusMeters: int = Field(default=1000, ge=250, le=3000)
 
 
@@ -621,37 +626,41 @@ async def grok_assessment(request: AnalysisRequest, deterministic: dict[str, Any
 async def analyse(request: AnalysisRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
     if min(request.startupCosts, request.monthlyRevenue, request.monthlyExpenses, request.monthlyGrowthPercent, request.totalAssets, request.totalLiabilities, request.cashOnHand) < 0 or request.customerCount < 0 or request.employees < 0:
         raise HTTPException(status_code=400, detail="Financial values cannot be negative.")
-    revenue = float(request.monthlyRevenue); expenses = float(request.monthlyExpenses); startup = float(request.startupCosts); growth = min(float(request.monthlyGrowthPercent), 25.0) / 100; monthly_profit = revenue - expenses
-    factors = {"technology": (88, "High", "Technology benefits from continued digital adoption, but competition is strong."), "ai": (92, "Very high", "AI demand is strong, but the proposal must solve a specific customer problem."), "artificial intelligence": (92, "Very high", "AI demand is strong, but the proposal must solve a specific customer problem."), "healthcare": (84, "High", "Healthcare demand is durable, but compliance and trust affect growth."), "agriculture": (78, "High", "Agricultural demand is durable, while weather and input costs create risk."), "education": (76, "High", "Education has durable demand, with affordability and customer acquisition risks."), "manufacturing": (74, "Moderate-high", "Manufacturing can scale through contracts, but working capital matters."), "retail": (65, "Moderate", "Retail depends on pricing, location, repeat customers, and competition."), "tourism": (63, "Moderate", "Tourism is sensitive to seasonality and economic conditions.")}
-    demand_score, demand_level, demand_note = (60, "Moderate", "Demand depends on the target market, customer validation, pricing, and execution.")
-    for key, factor in factors.items():
-        if key in request.industry.strip().lower(): demand_score, demand_level, demand_note = factor; break
-    def projection(month):
-        projected_revenue = revenue * ((1 + growth) ** month); projected_expenses = expenses * ((1 + (growth * 0.55)) ** month); return projected_revenue, projected_expenses, projected_revenue - projected_expenses
-    monthly = projection(0)[2]; projected12 = projection(12)[2]; projected18 = projection(18)[2]; projected24 = projection(24)[2]
+    revenue = float(request.monthlyRevenue); expenses = float(request.monthlyExpenses); startup = float(request.startupCosts); monthly_profit = revenue - expenses
     break_even = int((startup / monthly_profit) + 0.9999) if monthly_profit > 0 and startup > 0 else (0 if monthly_profit > 0 else None)
-    profitability_month = 0 if monthly_profit > 0 else None
-    if profitability_month is None:
-        for month in range(1, 61):
-            if projection(month)[2] > 0: profitability_month = month; break
     risks = []
-    if monthly_profit <= 0: risks.append("Current monthly expenses are higher than revenue.")
-    if startup > 0 and monthly_profit > 0 and break_even and break_even > 24: risks.append("Startup-cost recovery is expected to take more than two years.")
-    if growth == 0: risks.append("No monthly growth was provided; the forecast assumes flat revenue.")
-    if len(request.businessDescription.strip()) < 40: risks.append("Add customer, pricing, and traction detail to improve confidence.")
-    if not risks: risks.append("Validate demand with paying customers before committing the full investment.")
-    outlook = "Strong potential" if monthly_profit > 0 and demand_score >= 80 else "Potentially profitable" if monthly_profit > 0 else "Needs improvement"
-    confidence = "High" if monthly_profit > 0 and growth > 0 and len(request.businessDescription.strip()) >= 40 else "Medium" if monthly_profit > 0 else "Low"
-    horizon = f"about {profitability_month / 12:.1f} years" if profitability_month and profitability_month >= 12 else "within the first year" if profitability_month == 0 else "not reached within the five-year forecast"
+    if monthly_profit < 0:
+        risks.append("The monthly expenses entered are higher than the monthly revenue entered.")
+    if startup > 0 and monthly_profit > 0 and break_even and break_even > 24:
+        risks.append("At the current entered monthly surplus, recovering the startup cost would take more than 24 months.")
+    if len(request.businessDescription.strip()) < 40:
+        risks.append("Add customer, pricing, and sales evidence; the figures are not independently verified.")
+    if not risks:
+        risks.append("Confirm the revenue, expenses, taxes, seasonality, and customer demand with real records before relying on this estimate.")
+    outlook = "Monthly surplus in submitted figures" if monthly_profit > 0 else "Monthly deficit in submitted figures" if monthly_profit < 0 else "At break-even in submitted figures"
     liquidity = float(request.cashOnHand) / expenses if expenses > 0 else 0
     leverage = float(request.totalLiabilities) / float(request.totalAssets) if float(request.totalAssets) > 0 else 0
-    health_score = 50
-    health_score += 20 if monthly_profit > 0 else -20
-    health_score += 10 if liquidity >= 3 else 5 if liquidity >= 1 else -10
-    health_score += 10 if leverage <= 0.5 and float(request.totalAssets) > 0 else -10 if leverage > 1 else 0
-    health_score += 10 if request.customerCount > 10 else 5 if request.customerCount > 0 else -5
-    health_score = max(0, min(100, health_score))
-    result = {"outlook": outlook, "summary": f"At the figures supplied, the business is projected to become monthly-profitable {horizon}. The industry demand signal is {demand_level.lower()}, but execution and customer validation remain essential.", "estimatedBreakEvenMonths": break_even, "estimatedProfitabilityMonths": profitability_month, "estimatedMonthlyProfit": round(monthly_profit, 2), "estimatedAnnualProfit": round(monthly_profit * 12, 2), "projectedProfit12Months": round(projected12, 2), "projectedProfit18Months": round(projected18, 2), "projectedProfit24Months": round(projected24, 2), "monthlyExpenses": round(expenses, 2), "demandScore": demand_score, "demandLevel": demand_level, "demandNote": demand_note, "riskFlags": risks, "confidence": confidence, "financialHealthScore": health_score, "financialRatios": {"liquidityMonths": round(liquidity, 2), "liabilitiesToAssets": round(leverage, 3)}, "financialInputs": {"startupCosts": startup, "monthlyRevenue": revenue, "monthlyExpenses": expenses, "monthlyGrowthPercent": float(request.monthlyGrowthPercent), "totalAssets": float(request.totalAssets), "totalLiabilities": float(request.totalLiabilities), "cashOnHand": float(request.cashOnHand), "customerCount": request.customerCount, "employees": request.employees}, "aiAssessment": None, "aiProvider": "free-rules-engine", "disclaimer": "This is an advisory estimate based on the figures and general industry heuristics you entered. It is not live market research, a funding decision, or a profit guarantee."}
+    summary = (
+        f"The figures you entered show a monthly {'surplus' if monthly_profit > 0 else 'deficit' if monthly_profit < 0 else 'break-even'} of R{abs(monthly_profit):,.2f} (revenue minus expenses). "
+        "This arithmetic does not verify the figures or account for taxes, seasonality, financing costs, or unlisted expenses."
+    )
+    result = {
+        "outlook": outlook,
+        "summary": summary,
+        "estimatedBreakEvenMonths": break_even,
+        "estimatedMonthlyProfit": round(monthly_profit, 2),
+        "monthlyExpenses": round(expenses, 2),
+        "riskFlags": risks,
+        "financialRatios": {"liquidityMonths": round(liquidity, 2), "liabilitiesToAssets": round(leverage, 3)},
+        "businessType": request.businessType,
+        "businessTypeCategory": request.businessTypeCategory,
+        "customBusinessType": request.customBusinessType,
+        "industry": request.industry,
+        "financialInputs": {"startupCosts": startup, "monthlyRevenue": revenue, "monthlyExpenses": expenses, "monthlyGrowthPercent": float(request.monthlyGrowthPercent), "totalAssets": float(request.totalAssets), "totalLiabilities": float(request.totalLiabilities), "cashOnHand": float(request.cashOnHand), "customerCount": request.customerCount, "employees": request.employees},
+        "aiAssessment": None,
+        "aiProvider": "transparent-financial-calculator",
+        "disclaimer": "Calculated only from figures supplied by the user. No location-based demand, safety, profitability, or funding claim is verified. Use the separate map evidence as a limited indicator of mapped nearby activity, not as proof of customer demand or success."
+    }
     if request.profileId:
         profile = db.scalar(select(BusinessProfile).where(BusinessProfile.id == request.profileId, BusinessProfile.user_id == user.id))
         if not profile:
@@ -697,68 +706,131 @@ async def search_business_location(q: str = Query(min_length=2, max_length=200),
 async def analyse_location(request: LocationAnalysisRequest, user: User = Depends(require_role("ENTREPRENEUR"))):
     """Summarise nearby mapped business and access features; this is not a safety verdict."""
     lat, lon, radius = request.latitude, request.longitude, request.radiusMeters
-    query = f"""[out:json][timeout:15];
+    query = f"""[out:json][timeout:20];
     (nwr(around:{radius},{lat},{lon})[shop];
      nwr(around:{radius},{lat},{lon})[amenity];
      nwr(around:{radius},{lat},{lon})[office];
      nwr(around:{radius},{lat},{lon})[tourism];
      nwr(around:{radius},{lat},{lon})[public_transport];
      nwr(around:{radius},{lat},{lon})[industrial];
-     nwr(around:{radius},{lat},{lon})[landuse=industrial];);
-    out center tags 150;"""
+     nwr(around:{radius},{lat},{lon})[landuse~"residential|commercial|industrial|farmland|farmyard|orchard|vineyard"];
+     nwr(around:{radius},{lat},{lon})[highway=bus_stop];
+     nwr(around:{radius},{lat},{lon})[railway~"station|halt"];
+     nwr(around:{radius},{lat},{lon})[place~"suburb|neighbourhood|town|village"];
+     nwr(around:{radius},{lat},{lon})[leisure=park];);
+    out center tags 300;"""
     try:
-        async with httpx.AsyncClient(timeout=20, headers={"User-Agent": "FundBridge/1.0 (business location suitability)"}) as client:
+        async with httpx.AsyncClient(timeout=25, headers={"User-Agent": "FundBridge/1.0 (business location suitability)"}) as client:
             response = await client.post("https://overpass-api.de/api/interpreter", data={"data": query})
             response.raise_for_status()
             elements = response.json().get("elements", [])
     except Exception:
-        return {"status": "unavailable", "verdict": "Location data unavailable", "message": "Nearby map data could not be retrieved. Try again later or check the area locally.", "industry": request.industry, "radiusMeters": radius, "source": "OpenStreetMap via Overpass API", "safety": {"status": "not_assessed", "message": "Safety is not assessed. Nearby map features cannot establish whether a place is safe."}, "coordinates": {"latitude": lat, "longitude": lon}}
+        return {"status": "unavailable", "verdict": "Location data unavailable", "message": "Nearby map data could not be retrieved. Try again later or inspect the area locally.", "industry": request.industry, "businessType": request.businessType, "radiusMeters": radius, "source": "OpenStreetMap via Overpass API", "safety": {"status": "not_assessed", "message": "Safety is not assessed. Nearby map features cannot establish whether a place is safe."}, "coordinates": {"latitude": lat, "longitude": lon}}
 
     tags_list = [item.get("tags", {}) for item in elements]
-    industry = request.industry.lower()
-    supported_industry = any(word in industry for word in ("grocery", "supermarket", "convenience", "food shop", "retail", "shop", "restaurant", "food", "cafe", "catering", "health", "medical", "clinic", "pharmacy", "education", "school", "training", "tourism", "hotel", "accommodation", "hospitality", "agriculture", "farm", "manufactur", "industrial", "factory", "technology", "software", "computer", "it services"))
-    def matches(tags):
-        shop, amenity, office, tourism = (tags.get(key, "").lower() for key in ("shop", "amenity", "office", "tourism"))
-        if any(word in industry for word in ("grocery", "supermarket", "convenience", "food shop")):
-            return shop in {"supermarket", "convenience", "bakery", "butcher", "greengrocer", "deli"}
-        if "retail" in industry or "shop" in industry:
-            return bool(shop)
-        if any(word in industry for word in ("restaurant", "food", "cafe", "catering")):
-            return amenity in {"restaurant", "cafe", "fast_food", "food_court", "bar"}
-        if any(word in industry for word in ("health", "medical", "clinic", "pharmacy")):
-            return amenity in {"clinic", "doctors", "dentist", "hospital", "pharmacy"} or shop == "chemist"
-        if any(word in industry for word in ("education", "school", "training")):
-            return amenity in {"school", "college", "university", "kindergarten", "library"}
-        if any(word in industry for word in ("tourism", "hotel", "accommodation", "hospitality")):
-            return bool(tourism) or amenity in {"restaurant", "cafe", "bar"}
-        if any(word in industry for word in ("agriculture", "farm")):
-            return tags.get("landuse") in {"farmland", "farmyard", "orchard", "vineyard"} or shop == "farm"
-        if any(word in industry for word in ("manufactur", "industrial", "factory")):
-            return tags.get("landuse") == "industrial" or bool(tags.get("industrial"))
-        if any(word in industry for word in ("technology", "software", "computer", "it services")):
-            return office in {"it", "company", "coworking"} or shop == "computer"
+    category = request.businessTypeCategory.lower()
+    business_type = request.businessType.lower()
+    if category == "other":
+        free_type_rules = (
+            (("grocery", "supermarket", "convenience"), "grocery"),
+            (("clothing", "fashion", "shoe shop"), "clothing"),
+            (("restaurant", "takeaway"), "restaurant"), (("cafe", "coffee shop"), "cafe"),
+            (("salon", "barber", "hairdresser"), "salon"), (("pharmacy", "clinic", "medical"), "health"),
+            (("school", "daycare", "tutoring"), "education"), (("guesthouse", "hotel", "accommodation"), "tourism"),
+            (("mechanic", "car repair", "auto repair"), "automotive"), (("software", "technology", "it services"), "professional"),
+            (("farm", "agriculture"), "agriculture"), (("manufacturing", "workshop", "factory"), "manufacturing"),
+            (("phone repair", "mobile phone", "electronics shop"), "electronics"),
+        )
+        for keywords, inferred_category in free_type_rules:
+            if any(keyword in business_type for keyword in keywords):
+                category = inferred_category
+                break
+    def matches_business(tags):
+        shop = tags.get("shop", "").lower()
+        amenity = tags.get("amenity", "").lower()
+        office = tags.get("office", "").lower()
+        tourism = tags.get("tourism", "").lower()
+        if category == "grocery": return shop in {"supermarket", "convenience", "bakery", "butcher", "greengrocer", "deli"}
+        if category == "clothing": return shop in {"clothes", "shoes", "department_store", "fashion"}
+        if category == "restaurant": return amenity in {"restaurant", "fast_food", "food_court"}
+        if category == "cafe": return amenity == "cafe"
+        if category == "salon": return shop in {"hairdresser", "beauty", "barber", "nail_salon"}
+        if category == "health": return amenity in {"pharmacy", "clinic", "doctors", "dentist", "hospital"} or shop == "chemist"
+        if category == "education": return amenity in {"school", "college", "university", "kindergarten", "library", "music_school"}
+        if category == "tourism": return tourism in {"hotel", "guest_house", "hostel", "motel", "chalet", "apartment"}
+        if category == "automotive": return shop in {"car_repair", "car_parts", "tyres", "car"}
+        if category == "professional": return office in {"it", "company", "consulting", "coworking", "telecommunication"}
+        if category == "agriculture": return shop == "farm"
+        if category == "manufacturing": return bool(tags.get("industrial"))
+        if category == "electronics": return shop in {"mobile_phone", "electronics", "computer"}
+        # Only use a free-text fallback for clearly recognizable types.
+        if any(word in business_type for word in ("grocery", "supermarket", "convenience")): return shop in {"supermarket", "convenience", "bakery", "butcher", "greengrocer", "deli"}
+        if "phone repair" in business_type or "mobile phone" in business_type: return shop in {"mobile_phone", "electronics", "computer"}
+        if "clothing" in business_type or "fashion" in business_type: return shop in {"clothes", "shoes", "department_store", "fashion"}
+        if "restaurant" in business_type or "takeaway" in business_type: return amenity in {"restaurant", "fast_food", "food_court"}
+        if "cafe" in business_type: return amenity == "cafe"
+        if "salon" in business_type or "barber" in business_type: return shop in {"hairdresser", "beauty", "barber", "nail_salon"}
+        if "pharmacy" in business_type or "clinic" in business_type: return amenity in {"pharmacy", "clinic", "doctors", "dentist", "hospital"} or shop == "chemist"
+        if "school" in business_type or "daycare" in business_type or "tutoring" in business_type: return amenity in {"school", "college", "university", "kindergarten", "library"}
+        if "guesthouse" in business_type or "hotel" in business_type: return tourism in {"hotel", "guest_house", "hostel", "motel", "chalet", "apartment"}
+        if "mechanic" in business_type or "car repair" in business_type: return shop in {"car_repair", "car_parts", "tyres", "car"}
         return False
 
-    industry_matches = sum(1 for tags in tags_list if matches(tags))
-    shop_count = sum(1 for tags in tags_list if tags.get("shop"))
-    service_count = sum(1 for tags in tags_list if tags.get("amenity") or tags.get("office"))
-    transit_count = sum(1 for tags in tags_list if tags.get("public_transport") or tags.get("highway") in {"bus_stop", "platform"})
-    if not supported_industry:
-        status, verdict = "industry_unsupported", "Industry comparison unavailable"
-        message = "The current map matching rules do not cover this industry yet. Nearby features are shown as context only; this is not a finding that the location is unsuitable."
-    elif not elements:
-        status, verdict = "limited_data", "Limited map evidence"
-        message = "No relevant features were found in the mapped data for this radius. This may mean the area is under-mapped; it is not proof that the location is unsuitable."
-    elif industry_matches >= 8:
-        status, verdict = "mixed_evidence", "Established activity, with competition to investigate"
-        message = f"The map lists {industry_matches} nearby places matching this industry. That may indicate an existing customer market, but it also means you should compare prices and differentiate your offer."
-    elif industry_matches >= 1:
-        status, verdict = "some_evidence", "Some nearby industry activity"
-        message = f"The map lists {industry_matches} nearby place(s) matching this industry. This is a useful signal to investigate, not proof of customer demand or business success."
+    competitor_tags = [tags for tags in tags_list if matches_business(tags)]
+    competitor_count = len(competitor_tags)
+    total_features = len(elements)
+    residential_count = sum(1 for tags in tags_list if tags.get("landuse") == "residential" or tags.get("place") in {"suburb", "neighbourhood", "village"})
+    employment_count = sum(1 for tags in tags_list if tags.get("office") or tags.get("landuse") == "commercial")
+    transit_count = sum(1 for tags in tags_list if tags.get("public_transport") or tags.get("highway") == "bus_stop" or tags.get("railway") in {"station", "halt"})
+    schools_count = sum(1 for tags in tags_list if tags.get("amenity") in {"school", "college", "university", "kindergarten"})
+    tourism_count = sum(1 for tags in tags_list if tags.get("tourism") in {"attraction", "museum", "theme_park", "viewpoint", "hotel", "guest_house"})
+    industry_specific = category in {"grocery", "clothing", "restaurant", "cafe", "salon", "health", "education", "tourism", "automotive", "professional", "agriculture", "manufacturing", "electronics"}
+    industry_terms = {
+        "grocery": ("retail",), "clothing": ("retail",), "electronics": ("retail", "technology"),
+        "restaurant": ("food", "hospitality"), "cafe": ("food", "hospitality"),
+        "salon": ("personal", "beauty", "service"), "health": ("health", "care", "medical"),
+        "education": ("education",), "tourism": ("tourism", "hospitality"),
+        "automotive": ("automotive", "auto", "vehicle"), "professional": ("professional", "technology", "service", "it"),
+        "agriculture": ("agriculture", "farm"), "manufacturing": ("manufacturing", "trade", "industrial"),
+    }
+    expected_terms = industry_terms.get(category, ())
+    industry_aligned = not expected_terms or "other" in request.industry.lower() or any(term in request.industry.lower() for term in expected_terms)
+    if category in {"agriculture", "manufacturing"}:
+        relevant_anchors = sum(1 for tags in tags_list if tags.get("landuse") in {"industrial", "farmland", "farmyard", "orchard", "vineyard"})
+    elif category == "electronics":
+        relevant_anchors = residential_count + employment_count + transit_count
+    elif category == "tourism":
+        relevant_anchors = tourism_count + transit_count
+    elif category == "automotive":
+        relevant_anchors = transit_count + sum(1 for tags in tags_list if tags.get("amenity") in {"fuel", "parking"} or tags.get("landuse") == "industrial")
+    elif category in {"professional"}:
+        relevant_anchors = employment_count + transit_count
+    elif category == "education":
+        relevant_anchors = residential_count + transit_count + schools_count
     else:
-        status, verdict = "limited_evidence", "Limited mapped activity for this industry"
-        message = "No nearby places tagged for this industry were found. Map coverage may be incomplete, so validate demand with local customers before deciding."
-    return {"status": status, "verdict": verdict, "message": message, "industry": request.industry, "radiusMeters": radius, "mappedFeatureCount": len(elements), "nearbyShops": shop_count, "nearbyServices": service_count, "nearbyTransitFeatures": transit_count, "industryMatches": industry_matches if supported_industry else None, "industryMatchSupported": supported_industry, "resultLimit": 150, "source": "OpenStreetMap via Overpass API", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "OpenStreetMap is community-mapped and may omit businesses or features. This response samples at most 150 mapped features; counts are approximate and are not a measure of foot traffic, customer demand, or safety.", "safety": {"status": "not_assessed", "message": "Safety is not assessed. No address-level safety data was used; mapped businesses and amenities do not prove an area is safe."}, "coordinates": {"latitude": lat, "longitude": lon}}
+        relevant_anchors = residential_count + employment_count + transit_count + schools_count
+
+    if not industry_specific:
+        status, verdict = "type_unsupported", "Business type not covered by the map matching rules"
+        message = "Nearby features are listed for context, but the system cannot reliably match this business type to map categories yet. This is not a negative verdict."
+    elif total_features < 3:
+        status, verdict = "limited_data", "Not enough mapped information to assess this location"
+        message = "Fewer than three relevant features were found in the mapped area. The location cannot be judged from this sparse map data."
+    elif competitor_count >= 8:
+        status, verdict = "competition_signal", "Many mapped businesses of this type nearby"
+        message = f"The map lists {competitor_count} nearby businesses tagged like {request.businessType} and {relevant_anchors} contextual features. That is a competition signal, not proof that the area has enough customers or that the business will fail."
+    elif relevant_anchors == 0:
+        status, verdict = "review_context", "No matching customer or industry anchors found in the mapped area"
+        message = "The map did not show the nearby context this business type commonly uses. Verify the street, customer access, and demand in person; map coverage may be incomplete."
+    elif competitor_count > 0:
+        status, verdict = "context_signal", "Relevant local context found; check nearby competition"
+        message = f"The map lists {competitor_count} nearby business(es) tagged like {request.businessType} and {relevant_anchors} contextual places relevant to this type. Confirm customer demand and competitor quality locally."
+    else:
+        status, verdict = "unproven_opportunity", "No mapped businesses of this type found nearby"
+        message = f"No nearby places tagged like {request.businessType} were found. This could mean an opportunity or incomplete map coverage; validate demand with prospective customers before investing."
+    if industry_specific and not industry_aligned:
+        message = f"The selected industry sector ({request.industry}) may not match the business type ({request.businessType}). Check the form selections. " + message
+    return {"status": status, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "mappedFeatureCount": total_features, "competitorCount": competitor_count, "nearbyShops": sum(1 for tags in tags_list if tags.get("shop")), "nearbyAmenities": sum(1 for tags in tags_list if tags.get("amenity")), "nearbyOffices": employment_count, "nearbyTransitFeatures": transit_count, "residentialAreaFeatures": residential_count, "schoolFeatures": schools_count, "tourismFeatures": tourism_count, "relevantAnchors": relevant_anchors, "industryMatchSupported": industry_specific, "resultLimit": 300, "source": "OpenStreetMap via Overpass API", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "OpenStreetMap is community-mapped and may omit businesses or features. Up to 300 mapped features were sampled in a 1 km radius; this is not a foot-traffic count, verified census, safety rating, or proof of customer demand.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this location-fit analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
 
 
 @app.get("/api/funder/programmes/active")

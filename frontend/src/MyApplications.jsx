@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import ChatPanel from "./ChatPanel";
-const API = window.location.hostname === "localhost" ? (import.meta.env.VITE_API_URL || "http://localhost:8080") : "https://funding-platform-4vyt.onrender.com";
+import { API_BASE_URL as API } from "./apiBase.js";
 export default function MyApplications() {
   const [applications, setApplications] = useState([]); const [error, setError] = useState(""); const [view, setView] = useState("applications"); const [sortBy, setSortBy] = useState("newest"); const [chatTarget, setChatTarget] = useState(null); const [editing, setEditing] = useState(null); const [draft, setDraft] = useState(""); const [confirmDelete, setConfirmDelete] = useState(null); const headers = { "Content-Type": "application/json", Authorization: `Bearer ${sessionStorage.getItem("token")}` };
   async function load() { const response = await fetch(`${API}/api/entrepreneur/applications`, { headers }); if (!response.ok) { setError("Could not load applications."); return; } setApplications(await response.json()); }

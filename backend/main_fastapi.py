@@ -825,7 +825,8 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
 
     cache_key = (round(lat, 4), round(lon, 4), radius, category, business_type, request.industry.casefold())
     cached = LOCATION_ANALYSIS_CACHE.get(cache_key)
-    if cached and time.monotonic() - cached[0] < 1800:
+    cache_ttl = 60 if cached and cached[1].get("status") == "unavailable" else 1800
+    if cached and time.monotonic() - cached[0] < cache_ttl:
         return cached[1]
 
     competitor_filters = {
@@ -875,11 +876,11 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
         filters.append(f'nwr(around:{radius},{lat},{lon})[amenity~"school|college|university|kindergarten|hospital|clinic|doctors|veterinary|marketplace|community_centre|bus_station"]')
     for tag_filter in competitor_filter_values:
         filters.append(f'nwr(around:{radius},{lat},{lon}){tag_filter}')
-    query = f"[out:json][timeout:10];({';'.join(filters)};);out center tags 120;"
+    query = f"[out:json][timeout:8];({';'.join(filters)};);out center tags 250;"
 
     endpoints = (
-        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
         "https://overpass.private.coffee/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
         "https://overpass-api.de/api/interpreter",
     )
     elements = None
@@ -887,15 +888,19 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
     failures = []
     for endpoint in endpoints:
         try:
-            async with httpx.AsyncClient(timeout=12, headers={"User-Agent": "FundBridge/1.0 (business location suitability)", "Accept": "application/json"}) as client:
-                response = await client.post(endpoint, data={"data": query})
-                response.raise_for_status()
-                payload = response.json()
-                if payload.get("remark"):
-                    raise ValueError(payload["remark"])
-                elements = payload.get("elements", [])
-                used_endpoint = endpoint
-                break
+            # Cap the complete provider attempt as well as individual HTTP phases.
+            # Three slow public services plus the geocoder fallback can otherwise
+            # outlive the hosting platform's request window.
+            async with asyncio.timeout(5):
+                async with httpx.AsyncClient(timeout=httpx.Timeout(4, connect=2), headers={"User-Agent": "FundBridge/1.0 (business location suitability)", "Accept": "application/json"}) as client:
+                    response = await client.post(endpoint, data={"data": query})
+                    response.raise_for_status()
+                    payload = response.json()
+                    if payload.get("remark"):
+                        raise ValueError(payload["remark"])
+                    elements = payload.get("elements", [])
+                    used_endpoint = endpoint
+                    break
         except Exception as exc:
             failures.append(f"{endpoint}: {type(exc).__name__}")
     if elements is None:
@@ -925,7 +930,7 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
                     viewbox = f"{lon - lon_delta},{lat + lat_delta},{lon + lon_delta},{lat - lat_delta}"
                     contact = os.getenv("PUBLIC_GEOCODER_CONTACT", "")
                     agent = "FundBridge/1.0" + (f" ({contact})" if contact else "")
-                    async with httpx.AsyncClient(timeout=10, headers={"User-Agent": agent, "Accept": "application/json"}) as client:
+                    async with httpx.AsyncClient(timeout=httpx.Timeout(6, connect=2), headers={"User-Agent": agent, "Accept": "application/json"}) as client:
                         response = await client.get("https://nominatim.openstreetmap.org/search", params={"format": "jsonv2", "limit": 30, "countrycodes": "za", "viewbox": viewbox, "bounded": 1, "q": geocode_term})
                         response.raise_for_status()
                         rows = response.json()
@@ -971,7 +976,9 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
             except Exception as exc:
                 failures.append(f"Nominatim fallback: {type(exc).__name__}")
         logging.getLogger("fundbridge.location").warning("Nearby map fallback failed: %s", "; ".join(failures))
-        return {"status": "unavailable", "verdict": "Location data temporarily unavailable", "message": "Public map-data services could not return nearby listings. Your pin and business type are saved; try again shortly or check the surroundings in person.", "industry": request.industry, "businessType": request.businessType, "radiusMeters": radius, "source": "OpenStreetMap services", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
+        unavailable = {"status": "unavailable", "verdict": "Location data temporarily unavailable", "message": "Public map-data services could not return nearby listings. Your pin and business type are saved; try again shortly or check the surroundings in person.", "industry": request.industry, "businessType": request.businessType, "radiusMeters": radius, "source": "OpenStreetMap services", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
+        LOCATION_ANALYSIS_CACHE[cache_key] = (time.monotonic(), unavailable)
+        return unavailable
 
     tags_list = [item.get("tags", {}) for item in elements]
     def matches_business(tags):
@@ -1080,7 +1087,7 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
         message = f"No nearby places tagged like {request.businessType} were found. This could mean an opportunity or incomplete map coverage; validate demand with prospective customers before investing."
     if industry_specific and not industry_aligned:
         message = f"The selected industry sector ({request.industry}) may not match the business type ({request.businessType}). Check the form selections. " + message
-    result = {"status": status, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "mappedFeatureCount": total_features, "competitorCount": competitor_count, "nearbyShops": sum(1 for tags in tags_list if tags.get("shop")), "nearbyAmenities": sum(1 for tags in tags_list if tags.get("amenity")), "nearbyOffices": employment_count, "nearbyTransitFeatures": transit_count, "residentialAreaFeatures": residential_count, "schoolFeatures": schools_count, "tourismFeatures": tourism_count, "relevantAnchors": relevant_anchors, "industryMatchSupported": industry_specific, "resultLimit": 120, "contextDataAvailable": True, "contextNote": "Nearby mapped homes/places, shops, services, and transport are broad context indicators only. They are not customer counts, spending data, foot traffic, or proof of demand.", "source": f"OpenStreetMap via {used_endpoint}", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "OpenStreetMap is community-mapped and may omit businesses or features. Up to 120 mapped features were sampled in the selected radius; this is not a foot-traffic count, verified census, safety rating, or proof of customer demand.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this location-fit analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
+    result = {"status": status, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "mappedFeatureCount": total_features, "competitorCount": competitor_count, "nearbyShops": sum(1 for tags in tags_list if tags.get("shop")), "nearbyAmenities": sum(1 for tags in tags_list if tags.get("amenity")), "nearbyOffices": employment_count, "nearbyTransitFeatures": transit_count, "residentialAreaFeatures": residential_count, "schoolFeatures": schools_count, "tourismFeatures": tourism_count, "relevantAnchors": relevant_anchors, "industryMatchSupported": industry_specific, "resultLimit": 250, "contextDataAvailable": True, "contextNote": "Nearby mapped homes/places, shops, services, and transport are broad context indicators only. They are not customer counts, spending data, foot traffic, or proof of demand.", "source": f"OpenStreetMap via {used_endpoint}", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "OpenStreetMap is community-mapped and may omit businesses or features. Up to 250 mapped features were sampled in the selected radius; this is not a foot-traffic count, verified census, safety rating, or proof of customer demand.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this location-fit analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
     LOCATION_ANALYSIS_CACHE[cache_key] = (time.monotonic(), result)
     return result
 

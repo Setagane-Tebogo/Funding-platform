@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import ChatPanel from "./ChatPanel";
 import ProfilePage from "./ProfilePage";
 import ConfirmDialog from "./ConfirmDialog";
+import { API_BASE_URL as API } from "./apiBase.js";
 
-const API = window.location.hostname === "localhost" ? (import.meta.env.VITE_API_URL || "http://localhost:8080") : "https://funding-platform-4vyt.onrender.com";
 const empty = { programmeName: "", fundingType: "Grant", minimumFunding: "", maximumFunding: "", industry: "", businessStage: "", location: "", description: "", requirements: "" };
 export default function FunderDashboard({ view, onViewChange }) {
   const [programmes, setProgrammes] = useState([]), [applications, setApplications] = useState([]), [profiles, setProfiles] = useState([]), [form, setForm] = useState(empty), [editing, setEditing] = useState(null), [search, setSearch] = useState(""), [sort, setSort] = useState("newest"), [message, setMessage] = useState(""), [error, setError] = useState(""), [chatTarget, setChatTarget] = useState(null), [profileTarget, setProfileTarget] = useState(null), [programmeToDelete, setProgrammeToDelete] = useState(null), [isDeleting, setIsDeleting] = useState(false), [deleteError, setDeleteError] = useState("");
@@ -25,6 +25,6 @@ export default function FunderDashboard({ view, onViewChange }) {
 
 function EntrepreneurProfile({ entrepreneurId, onClose }) {
   const [profile, setProfile] = useState(null); const [profileError, setProfileError] = useState("");
-  useEffect(() => { const api = window.location.hostname === "localhost" ? (import.meta.env.VITE_API_URL || "http://localhost:8080") : "https://funding-platform-4vyt.onrender.com"; fetch(`${api}/api/funder/entrepreneurs/${entrepreneurId}/profile`, { headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` } }).then(async (r) => { const d = await r.json().catch(() => null); if (!r.ok) throw new Error(d?.detail || "Could not load profile."); return d; }).then(setProfile).catch((e) => setProfileError(e.message)); }, [entrepreneurId]);
+  useEffect(() => { fetch(`${API}/api/funder/entrepreneurs/${entrepreneurId}/profile`, { headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` } }).then(async (r) => { const d = await r.json().catch(() => null); if (!r.ok) throw new Error(d?.detail || "Could not load profile."); return d; }).then(setProfile).catch((e) => setProfileError(e.message)); }, [entrepreneurId]);
   return <div className="modal-backdrop"><section className="profile-modal" role="dialog" aria-modal="true"><button type="button" className="modal-close" onClick={onClose}>×</button>{profileError ? <p className="profile-message error">{profileError}</p> : !profile ? <p>Loading profile...</p> : <><div className="profile-modal-heading"><div className="profile-avatar">{profile.avatar ? <img src={profile.avatar} alt="" /> : profile.name.slice(0, 2).toUpperCase()}</div><div><p className="eyebrow">ENTREPRENEUR PROFILE</p><h2>{profile.name}</h2><p>{profile.email}</p></div></div><div className="profile-details"><p><strong>Phone</strong>{profile.phone || "Not provided"}</p><p><strong>Location</strong>{profile.location || "Not provided"}</p><p className="profile-wide"><strong>About</strong>{profile.bio || "No biography added yet."}</p>{profile.business && <p className="profile-wide"><strong>Business</strong>{profile.business.businessName} · {profile.business.industry}<br />{profile.business.description}</p>}</div></>}</section></div>;
 }

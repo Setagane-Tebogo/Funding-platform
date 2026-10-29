@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-const API_ROOT = window.location.hostname === "localhost" ? (import.meta.env.VITE_API_URL || "http://localhost:8080") : "https://funding-platform-4vyt.onrender.com";
+import { API_BASE_URL as API_ROOT } from "./apiBase.js";
 const emptyApplication = { proposal: "", requestedAmount: "", useOfFunds: "", timeline: "" };
 export default function FindFunding() {
   const [programmes, setProgrammes] = useState([]); const [industry, setIndustry] = useState(""); const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [message, setMessage] = useState(""); const [selected, setSelected] = useState(null); const [application, setApplication] = useState(emptyApplication); const [submitting, setSubmitting] = useState(false);

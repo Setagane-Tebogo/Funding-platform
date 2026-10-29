@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import ConfirmDialog from "./ConfirmDialog";
-const API = window.location.hostname === "localhost" ? (import.meta.env.VITE_API_URL || "http://localhost:8080") : "https://funding-platform-4vyt.onrender.com";
+import { API_BASE_URL as API } from "./apiBase.js";
 export default function AdminDashboard({ view: activeView }) {
   const [pendingDelete, setPendingDelete] = useState(null); const [isDeleting, setIsDeleting] = useState(false); const [deleteError, setDeleteError] = useState("");
   const [view, setView] = useState("overview"); const [organisations, setOrganisations] = useState([]); const [users, setUsers] = useState([]); const [applications, setApplications] = useState([]); const [programmes, setProgrammes] = useState([]); const [message, setMessage] = useState(""); const [error, setError] = useState(""); const headers = { Authorization: `Bearer ${sessionStorage.getItem("token")}` };

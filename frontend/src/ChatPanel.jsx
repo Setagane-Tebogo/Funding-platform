@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
+import { API_BASE_URL as API } from "./apiBase.js";
 import "./ChatPanel.css";
-const API = window.location.hostname === "localhost" ? (import.meta.env.VITE_API_URL || "http://localhost:8080") : "https://funding-platform-4vyt.onrender.com";
 export default function ChatPanel({ startTarget }) {
   const [conversations, setConversations] = useState([]); const [selected, setSelected] = useState(null); const [messages, setMessages] = useState([]); const [draft, setDraft] = useState(""); const [search, setSearch] = useState(""); const [error, setError] = useState("");
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${sessionStorage.getItem("token")}` }; const currentUser = JSON.parse(sessionStorage.getItem("user") || "{}"); const currentUserId = Number(currentUser.id); const currentRole = currentUser.role;

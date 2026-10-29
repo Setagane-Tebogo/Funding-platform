@@ -1,8 +1,9 @@
 
 import { useState } from "react";
 import "./AuthPage.css";
+import { API_BASE_URL } from "./apiBase.js";
 
-const API_URL = `${window.location.hostname === "localhost" ? (import.meta.env.VITE_API_URL || "http://localhost:8080") : "https://funding-platform-4vyt.onrender.com"}/api/auth`;
+const API_URL = `${API_BASE_URL}/api/auth`;
 
 export default function AuthPage({ onLogin }) {
   const [mode, setMode] = useState("login");

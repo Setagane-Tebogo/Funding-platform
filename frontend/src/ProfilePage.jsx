@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-
-const API = window.location.hostname === "localhost" ? (import.meta.env.VITE_API_URL || "http://localhost:8080") : "https://funding-platform-4vyt.onrender.com";
+import { API_BASE_URL as API } from "./apiBase.js";
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState({ name: "", email: "", phone: "", location: "", bio: "", avatar: "" });

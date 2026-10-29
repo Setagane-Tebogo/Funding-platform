@@ -183,6 +183,8 @@ export default function BusinessProfile() {
     const providedInputs = Object.entries(fields).filter(([, field]) => String(form[field] ?? "").trim() !== "").map(([key]) => key);
     if (form.customerCount !== "") providedInputs.push("customerCount");
     setAnalyzing(true); setError(""); setMessage(""); setAnalysis(null);
+    const assessmentController = new AbortController();
+    const assessmentTimeout = window.setTimeout(() => assessmentController.abort(), 28000);
     try {
       const payload = {
         ...(selectedId ? { profileId: selectedId } : {}),
@@ -202,7 +204,7 @@ export default function BusinessProfile() {
         targetMarket: form.targetMarket, businessExperience: form.businessExperience,
         operationsPlan: form.operationsPlan, riskMitigation: form.riskMitigation, providedInputs,
       };
-      const response = await fetch(API + "/api/entrepreneur/business-assessments", { method: "POST", headers, body: JSON.stringify(payload) });
+      const response = await fetch(API + "/api/entrepreneur/business-assessments", { method: "POST", headers, body: JSON.stringify(payload), signal: assessmentController.signal });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.detail || "Could not assess this business.");
       const result = data;
@@ -211,8 +213,11 @@ export default function BusinessProfile() {
       await loadAssessmentHistory(selectedId, data.businessKey);
       setMessage("Assessment completed and saved to your history.");
     } catch (assessmentError) {
-      setError(assessmentError.message || "Could not assess this business.");
+      setError(assessmentError.name === "AbortError"
+        ? "The location-data services took too long to respond. Please run the assessment again in a moment."
+        : assessmentError.message || "Could not assess this business.");
     } finally {
+      window.clearTimeout(assessmentTimeout);
       setAnalyzing(false);
     }
   }

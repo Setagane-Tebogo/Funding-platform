@@ -8,6 +8,7 @@ import ChatPanel from "./ChatPanel";
 import FunderDashboard from "./FunderDashboard";
 import AdminDashboard from "./AdminDashboard";
 import ProfilePage from "./ProfilePage";
+import { API_BASE_URL as PROFILE_API } from "./apiBase.js";
 
 const menuItems = [
   { label: "Overview", icon: "overview" },
@@ -17,8 +18,6 @@ const menuItems = [
   { label: "Messages", icon: "messages" },
   { label: "Profile", icon: "profile" },
 ];
-
-const PROFILE_API = window.location.hostname === "localhost" ? (import.meta.env.VITE_API_URL || "http://localhost:8080") : "https://funding-platform-4vyt.onrender.com";
 
 function NavigationIcon({ name }) {
   const paths = {

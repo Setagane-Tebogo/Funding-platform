@@ -259,6 +259,7 @@ class AnalysisRequest(BaseModel):
     cashOnHand: Decimal = Decimal("0")
     customerCount: int = 0
     employees: int = 0
+    providedFinancialInputs: list[str] = Field(default_factory=list)
     industry: str = ""
     businessType: str = ""
     businessTypeCategory: str = "other"
@@ -275,7 +276,7 @@ class LocationAnalysisRequest(BaseModel):
     industry: str = Field(min_length=1, max_length=255)
     businessType: str = Field(min_length=1, max_length=255)
     businessTypeCategory: str = "other"
-    radiusMeters: int = Field(default=1000, ge=250, le=3000)
+    radiusMeters: int = Field(default=5000, ge=250, le=10000)
 
 
 class ModelPredictionRequest(BaseModel):
@@ -633,6 +634,8 @@ async def analyse(request: AnalysisRequest, user: User = Depends(require_role("E
         risks.append("The monthly expenses entered are higher than the monthly revenue entered.")
     if startup > 0 and monthly_profit > 0 and break_even and break_even > 24:
         risks.append("At the current entered monthly surplus, recovering the startup cost would take more than 24 months.")
+    if float(request.monthlyGrowthPercent) > 10:
+        risks.append("The entered monthly growth rate is above 10%. Sustaining a rate this high is unusual; treat the compounded scenarios as a stress-test assumption, not an expected result.")
     if len(request.businessDescription.strip()) < 40:
         risks.append("Add customer, pricing, and sales evidence; the figures are not independently verified.")
     if not risks:
@@ -672,7 +675,7 @@ async def analyse(request: AnalysisRequest, user: User = Depends(require_role("E
         "businessTypeCategory": request.businessTypeCategory,
         "customBusinessType": request.customBusinessType,
         "industry": request.industry,
-        "financialInputs": {"startupCosts": startup, "monthlyRevenue": revenue, "monthlyExpenses": expenses, "monthlyGrowthPercent": float(request.monthlyGrowthPercent), "totalAssets": float(request.totalAssets), "totalLiabilities": float(request.totalLiabilities), "cashOnHand": float(request.cashOnHand), "customerCount": request.customerCount, "employees": request.employees},
+        "financialInputs": {"startupCosts": startup, "monthlyRevenue": revenue, "monthlyExpenses": expenses, "monthlyGrowthPercent": float(request.monthlyGrowthPercent), "totalAssets": float(request.totalAssets), "totalLiabilities": float(request.totalLiabilities), "cashOnHand": float(request.cashOnHand), "customerCount": request.customerCount, "employees": request.employees, "providedFields": request.providedFinancialInputs},
         "aiAssessment": None,
         "aiProvider": "transparent-financial-calculator",
         "disclaimer": "Calculated only from figures supplied by the user. No location-based demand, safety, profitability, or funding claim is verified. Use the separate map evidence as a limited indicator of mapped nearby activity, not as proof of customer demand or success."
@@ -788,7 +791,7 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
         f'nwr(around:{radius},{lat},{lon})[public_transport]',
         f'nwr(around:{radius},{lat},{lon})[highway=bus_stop]',
         f'nwr(around:{radius},{lat},{lon})[railway~"station|halt"]',
-        f'nwr(around:{radius},{lat},{lon})[place~"suburb|neighbourhood|town|village"]',
+        f'nwr(around:{radius},{lat},{lon})[place~"suburb|neighbourhood|town|village|hamlet|isolated_dwelling|farm|locality"]',
     ]
     if category in {"agriculture", "farm_supply", "manufacturing", "construction"}:
         filters.append(f'nwr(around:{radius},{lat},{lon})[landuse~"industrial|farmland|farmyard|orchard|vineyard"]')
@@ -942,7 +945,7 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
     competitor_tags = [tags for tags in tags_list if matches_business(tags)]
     competitor_count = len(competitor_tags)
     total_features = len(elements)
-    residential_count = sum(1 for tags in tags_list if tags.get("landuse") == "residential" or tags.get("place") in {"suburb", "neighbourhood", "village"})
+    residential_count = sum(1 for tags in tags_list if tags.get("landuse") == "residential" or tags.get("place") in {"suburb", "neighbourhood", "village", "hamlet", "isolated_dwelling", "farm", "locality"})
     employment_count = sum(1 for tags in tags_list if tags.get("office") or tags.get("landuse") == "commercial")
     transit_count = sum(1 for tags in tags_list if tags.get("public_transport") or tags.get("highway") == "bus_stop" or tags.get("railway") in {"station", "halt"})
     schools_count = sum(1 for tags in tags_list if tags.get("amenity") in {"school", "college", "university", "kindergarten"})
@@ -961,8 +964,12 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
     }
     expected_terms = industry_terms.get(category, ())
     industry_aligned = not expected_terms or "other" in request.industry.lower() or any(term in request.industry.lower() for term in expected_terms)
-    if category in {"agriculture", "farm_supply", "manufacturing"}:
-        relevant_anchors = sum(1 for tags in tags_list if tags.get("landuse") in {"industrial", "farmland", "farmyard", "orchard", "vineyard"})
+    if category in {"agriculture", "farm_supply"}:
+        rural_activity = sum(1 for tags in tags_list if tags.get("landuse") in {"farmland", "farmyard", "orchard", "vineyard"} or tags.get("place") in {"hamlet", "farm", "locality"})
+        relevant_anchors = rural_activity + transit_count
+    elif category == "manufacturing":
+        industrial_activity = sum(1 for tags in tags_list if tags.get("landuse") == "industrial" or tags.get("place") in {"hamlet", "farm", "locality"})
+        relevant_anchors = industrial_activity + employment_count + transit_count
     elif category == "electronics":
         relevant_anchors = residential_count + employment_count + transit_count
     elif category in {"tourism", "travel"}:

@@ -272,3 +272,8 @@
 .financial-estimate h3 { margin-top: 0; }
 
 .location-type-warning { padding: 10px; border-radius: 7px; color: #755300; background: #fff5d8; }
+.suitability-score { grid-column: 1 / -1; padding: 18px 20px; border: 1px solid #c9ddcf; border-left: 5px solid #1f6845; border-radius: 10px; background: #f3f8f4; }
+.suitability-score h3 { margin: 3px 0 10px; color: #174c35; font-size: 22px; }
+.suitability-score p { line-height: 1.5; }
+.suitability-score ul { margin-bottom: 10px; }
+.suitability-score small { color: #59665d; line-height: 1.5; }

@@ -702,49 +702,189 @@ async def search_business_location(q: str = Query(min_length=2, max_length=200),
         return results
 
 
+LOCATION_ANALYSIS_CACHE: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
+
+
 @app.post("/api/entrepreneur/location-analysis")
 async def analyse_location(request: LocationAnalysisRequest, user: User = Depends(require_role("ENTREPRENEUR"))):
     """Summarise nearby mapped business and access features; this is not a safety verdict."""
     lat, lon, radius = request.latitude, request.longitude, request.radiusMeters
-    query = f"""[out:json][timeout:20];
-    (nwr(around:{radius},{lat},{lon})[shop];
-     nwr(around:{radius},{lat},{lon})[amenity];
-     nwr(around:{radius},{lat},{lon})[office];
-     nwr(around:{radius},{lat},{lon})[tourism];
-     nwr(around:{radius},{lat},{lon})[public_transport];
-     nwr(around:{radius},{lat},{lon})[industrial];
-     nwr(around:{radius},{lat},{lon})[landuse~"residential|commercial|industrial|farmland|farmyard|orchard|vineyard"];
-     nwr(around:{radius},{lat},{lon})[highway=bus_stop];
-     nwr(around:{radius},{lat},{lon})[railway~"station|halt"];
-     nwr(around:{radius},{lat},{lon})[place~"suburb|neighbourhood|town|village"];
-     nwr(around:{radius},{lat},{lon})[leisure=park];);
-    out center tags 300;"""
-    try:
-        async with httpx.AsyncClient(timeout=25, headers={"User-Agent": "FundBridge/1.0 (business location suitability)"}) as client:
-            response = await client.post("https://overpass-api.de/api/interpreter", data={"data": query})
-            response.raise_for_status()
-            elements = response.json().get("elements", [])
-    except Exception:
-        return {"status": "unavailable", "verdict": "Location data unavailable", "message": "Nearby map data could not be retrieved. Try again later or inspect the area locally.", "industry": request.industry, "businessType": request.businessType, "radiusMeters": radius, "source": "OpenStreetMap via Overpass API", "safety": {"status": "not_assessed", "message": "Safety is not assessed. Nearby map features cannot establish whether a place is safe."}, "coordinates": {"latitude": lat, "longitude": lon}}
-
-    tags_list = [item.get("tags", {}) for item in elements]
     category = request.businessTypeCategory.lower()
     business_type = request.businessType.lower()
     if category == "other":
         free_type_rules = (
             (("grocery", "supermarket", "convenience"), "grocery"),
             (("clothing", "fashion", "shoe shop"), "clothing"),
-            (("restaurant", "takeaway"), "restaurant"), (("cafe", "coffee shop"), "cafe"),
-            (("salon", "barber", "hairdresser"), "salon"), (("pharmacy", "clinic", "medical"), "health"),
-            (("school", "daycare", "tutoring"), "education"), (("guesthouse", "hotel", "accommodation"), "tourism"),
-            (("mechanic", "car repair", "auto repair"), "automotive"), (("software", "technology", "it services"), "professional"),
-            (("farm", "agriculture"), "agriculture"), (("manufacturing", "workshop", "factory"), "manufacturing"),
+            (("restaurant", "takeaway", "catering"), "restaurant"), (("cafe", "coffee shop"), "cafe"),
+            (("bakery", "baker"), "grocery"), (("salon", "barber", "hairdresser"), "salon"),
+            (("laundry", "dry cleaning"), "laundry"), (("tailor", "tailoring"), "tailoring"),
+            (("veterinary", "vet clinic"), "veterinary"), (("pharmacy", "clinic", "medical"), "health"),
+            (("school", "daycare", "tutoring", "training centre"), "education"),
+            (("guesthouse", "hotel", "accommodation"), "tourism"), (("travel agency", "tour operator"), "travel"),
+            (("mechanic", "car repair", "auto repair"), "automotive"), (("car wash", "carwash"), "carwash"),
+            (("software", "technology", "it services"), "professional"), (("accounting", "bookkeeping"), "professional"),
+            (("legal", "law practice"), "professional"), (("farm supply", "agricultural supplies"), "farm_supply"),
+            (("farm", "agriculture"), "agriculture"), (("construction", "builder", "plumber", "electrician"), "construction"),
+            (("manufacturing", "workshop", "factory"), "manufacturing"),
             (("phone repair", "mobile phone", "electronics shop"), "electronics"),
         )
         for keywords, inferred_category in free_type_rules:
             if any(keyword in business_type for keyword in keywords):
                 category = inferred_category
                 break
+    category_aliases = {
+        "bakery": "grocery", "catering": "restaurant", "training": "education",
+        "accommodation": "tourism", "accounting": "professional", "legal": "professional",
+    }
+    category = category_aliases.get(category, category)
+
+    cache_key = (round(lat, 4), round(lon, 4), radius, category, business_type, request.industry.casefold())
+    cached = LOCATION_ANALYSIS_CACHE.get(cache_key)
+    if cached and time.monotonic() - cached[0] < 1800:
+        return cached[1]
+
+    competitor_filters = {
+        "grocery": '[shop~"supermarket|convenience|bakery|butcher|greengrocer|deli"]',
+        "clothing": '[shop~"clothes|shoes|department_store|fashion"]',
+        "restaurant": '[amenity~"restaurant|fast_food|food_court"]',
+        "cafe": '[amenity=cafe]',
+        "salon": '[shop~"hairdresser|beauty|barber|nail_salon"]',
+        "laundry": '[shop~"laundry|dry_cleaning"]',
+        "tailoring": '[shop=tailor]',
+        "veterinary": '[amenity=veterinary]',
+        "travel": '[shop=travel_agency]',
+        "carwash": '[amenity=car_wash]',
+        "farm_supply": '[shop~"agrarian|farm"]',
+        "construction": ('[craft~"builder|carpenter|electrician|plumber|metal_construction|painter|stonemason"]', '[office=construction]'),
+        "manufacturing": '[industrial]',
+        "health": ('[amenity~"pharmacy|clinic|doctors|dentist|hospital"]', '[shop=chemist]'),
+        "education": '[amenity~"school|college|university|kindergarten|library|music_school"]',
+        "tourism": '[tourism~"hotel|guest_house|hostel|motel|chalet|apartment"]',
+        "automotive": '[shop~"car_repair|car_parts|tyres|car"]',
+        "professional": '[office~"it|company|consulting|coworking|telecommunication"]',
+        "agriculture": '[shop=farm]',
+        "electronics": '[shop~"mobile_phone|electronics|computer"]',
+    }
+    # Do not count industrial estates or farms as competing businesses.
+    competitor_filter = competitor_filters.get(category)
+    competitor_filter_values = competitor_filter if isinstance(competitor_filter, tuple) else ((competitor_filter,) if competitor_filter else ())
+    filters = [
+        f'nwr(around:{radius},{lat},{lon})[public_transport]',
+        f'nwr(around:{radius},{lat},{lon})[highway=bus_stop]',
+        f'nwr(around:{radius},{lat},{lon})[railway~"station|halt"]',
+        f'nwr(around:{radius},{lat},{lon})[place~"suburb|neighbourhood|town|village"]',
+    ]
+    if category in {"agriculture", "farm_supply", "manufacturing", "construction"}:
+        filters.append(f'nwr(around:{radius},{lat},{lon})[landuse~"industrial|farmland|farmyard|orchard|vineyard"]')
+    else:
+        filters.append(f'nwr(around:{radius},{lat},{lon})[landuse=residential]')
+    if category in {"tourism", "travel"}:
+        filters.append(f'nwr(around:{radius},{lat},{lon})[tourism~"attraction|museum|theme_park|viewpoint|hotel|guest_house"]')
+    elif category == "professional":
+        filters.append(f'nwr(around:{radius},{lat},{lon})[office]')
+    elif category == "automotive":
+        filters.append(f'nwr(around:{radius},{lat},{lon})[amenity~"fuel|parking"]')
+    elif category not in {"agriculture", "farm_supply", "manufacturing", "construction"} and category not in {"professional", "tourism", "travel"}:
+        filters.append(f'nwr(around:{radius},{lat},{lon})[amenity~"school|college|university|kindergarten|hospital|clinic|doctors|veterinary|marketplace|community_centre|bus_station"]')
+    for tag_filter in competitor_filter_values:
+        filters.append(f'nwr(around:{radius},{lat},{lon}){tag_filter}')
+    query = f"[out:json][timeout:10];({';'.join(filters)};);out center tags 120;"
+
+    endpoints = (
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+        "https://overpass-api.de/api/interpreter",
+    )
+    elements = None
+    used_endpoint = None
+    failures = []
+    for endpoint in endpoints:
+        try:
+            async with httpx.AsyncClient(timeout=12, headers={"User-Agent": "FundBridge/1.0 (business location suitability)", "Accept": "application/json"}) as client:
+                response = await client.post(endpoint, data={"data": query})
+                response.raise_for_status()
+                payload = response.json()
+                if payload.get("remark"):
+                    raise ValueError(payload["remark"])
+                elements = payload.get("elements", [])
+                used_endpoint = endpoint
+                break
+        except Exception as exc:
+            failures.append(f"{endpoint}: {type(exc).__name__}")
+    if elements is None:
+        logging.getLogger("fundbridge.location").warning("All nearby map providers failed: %s", "; ".join(failures))
+        # Nominatim is not a complete POI database, but can still return named places
+        # matching the selected activity. Report it as partial evidence only.
+        search_terms = {
+            "grocery": "supermarket", "clothing": "clothing shop", "restaurant": "restaurant",
+            "cafe": "cafe", "salon": "hair salon", "health": "pharmacy", "education": "school",
+            "tourism": "hotel", "automotive": "car repair", "professional": "software company",
+            "agriculture": "farm", "manufacturing": "factory", "electronics": "electronics shop",
+            "laundry": "laundry", "tailoring": "tailor", "veterinary": "veterinary clinic",
+            "travel": "travel agency", "carwash": "car wash", "farm_supply": "agricultural supply",
+            "construction": "construction company",
+        }
+        geocode_term = search_terms.get(category)
+        if geocode_term:
+            global LOCATION_SEARCH_LAST_CALL
+            try:
+                async with LOCATION_SEARCH_LOCK:
+                    wait = 1.0 - (time.monotonic() - LOCATION_SEARCH_LAST_CALL)
+                    if wait > 0:
+                        await asyncio.sleep(wait)
+                    lat_delta = radius / 111_320
+                    lon_delta = radius / max(1, 111_320 * math.cos(math.radians(lat)))
+                    viewbox = f"{lon - lon_delta},{lat + lat_delta},{lon + lon_delta},{lat - lat_delta}"
+                    contact = os.getenv("PUBLIC_GEOCODER_CONTACT", "")
+                    agent = "FundBridge/1.0" + (f" ({contact})" if contact else "")
+                    async with httpx.AsyncClient(timeout=10, headers={"User-Agent": agent, "Accept": "application/json"}) as client:
+                        response = await client.get("https://nominatim.openstreetmap.org/search", params={"format": "jsonv2", "limit": 30, "countrycodes": "za", "viewbox": viewbox, "bounded": 1, "q": geocode_term})
+                        response.raise_for_status()
+                        rows = response.json()
+                    LOCATION_SEARCH_LAST_CALL = time.monotonic()
+                def distance_meters(place_lat, place_lon):
+                    lat1, lat2 = math.radians(lat), math.radians(place_lat)
+                    dlat = lat2 - lat1
+                    dlon = math.radians(place_lon - lon)
+                    haversine = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+                    return 6_371_000 * 2 * math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine))
+                listed_places = []
+                for row in rows:
+                    try:
+                        place_lat, place_lon = float(row["lat"]), float(row["lon"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    distance = distance_meters(place_lat, place_lon)
+                    if distance <= radius:
+                        listed_places.append({"name": row.get("name") or row.get("display_name", geocode_term), "distanceMeters": round(distance), "latitude": place_lat, "longitude": place_lon})
+                listed_places.sort(key=lambda place: place["distanceMeters"])
+                if listed_places:
+                    status_value = "partial_geocoder"
+                    verdict = f"{len(listed_places)} nearby named listing(s) match {request.businessType}"
+                    message = f"The geocoder returned {len(listed_places)} named place(s) matching '{geocode_term}' in the selected radius. The closest returned listing is about {listed_places[0]['distanceMeters']} m away. This is partial search evidence, not a complete competitor count or proof of customer demand."
+                else:
+                    status_value = "partial_data"
+                    verdict = "No matching named listings found; location fit is unknown"
+                    message = f"The geocoder returned no named '{geocode_term}' listings in this radius. It may omit businesses, so this does not mean none exist or that the location is unsuitable. Check the area in person."
+                fallback_industry_terms = {
+                    "grocery": ("retail",), "clothing": ("retail",), "electronics": ("retail", "technology"),
+                    "restaurant": ("food", "hospitality"), "cafe": ("food", "hospitality"),
+                    "salon": ("personal", "beauty", "service"), "health": ("health", "care", "medical"),
+                    "education": ("education",), "tourism": ("tourism", "hospitality"),
+                    "automotive": ("automotive", "auto", "vehicle"), "professional": ("professional", "technology", "service", "it"),
+                    "agriculture": ("agriculture", "farm"), "manufacturing": ("manufacturing", "trade", "industrial"),
+                }
+                expected_industry_terms = fallback_industry_terms.get(category, ())
+                fallback_industry_aligned = not expected_industry_terms or "other" in request.industry.lower() or any(term in request.industry.lower() for term in expected_industry_terms)
+                fallback = {"status": status_value, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": fallback_industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "nearbyTypeListingsCount": len(listed_places), "nearbyTypeListings": listed_places[:10], "source": "OpenStreetMap Nominatim bounded search", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "This fallback searches named/indexed map listings only. It is incomplete and does not count every business or surrounding feature.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
+                LOCATION_ANALYSIS_CACHE[cache_key] = (time.monotonic(), fallback)
+                return fallback
+            except Exception as exc:
+                failures.append(f"Nominatim fallback: {type(exc).__name__}")
+        logging.getLogger("fundbridge.location").warning("Nearby map fallback failed: %s", "; ".join(failures))
+        return {"status": "unavailable", "verdict": "Location data temporarily unavailable", "message": "Public map-data services could not return nearby listings. Your pin and business type are saved; try again shortly or check the surroundings in person.", "industry": request.industry, "businessType": request.businessType, "radiusMeters": radius, "source": "OpenStreetMap services", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
+
+    tags_list = [item.get("tags", {}) for item in elements]
     def matches_business(tags):
         shop = tags.get("shop", "").lower()
         amenity = tags.get("amenity", "").lower()
@@ -755,6 +895,13 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
         if category == "restaurant": return amenity in {"restaurant", "fast_food", "food_court"}
         if category == "cafe": return amenity == "cafe"
         if category == "salon": return shop in {"hairdresser", "beauty", "barber", "nail_salon"}
+        if category == "laundry": return shop in {"laundry", "dry_cleaning"}
+        if category == "tailoring": return shop == "tailor"
+        if category == "veterinary": return amenity == "veterinary"
+        if category == "travel": return shop == "travel_agency"
+        if category == "carwash": return amenity == "car_wash"
+        if category == "farm_supply": return shop in {"agrarian", "farm"}
+        if category == "construction": return tags.get("craft") in {"builder", "carpenter", "electrician", "plumber", "metal_construction", "painter", "stonemason"} or office == "construction"
         if category == "health": return amenity in {"pharmacy", "clinic", "doctors", "dentist", "hospital"} or shop == "chemist"
         if category == "education": return amenity in {"school", "college", "university", "kindergarten", "library", "music_school"}
         if category == "tourism": return tourism in {"hotel", "guest_house", "hostel", "motel", "chalet", "apartment"}
@@ -784,27 +931,32 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
     transit_count = sum(1 for tags in tags_list if tags.get("public_transport") or tags.get("highway") == "bus_stop" or tags.get("railway") in {"station", "halt"})
     schools_count = sum(1 for tags in tags_list if tags.get("amenity") in {"school", "college", "university", "kindergarten"})
     tourism_count = sum(1 for tags in tags_list if tags.get("tourism") in {"attraction", "museum", "theme_park", "viewpoint", "hotel", "guest_house"})
-    industry_specific = category in {"grocery", "clothing", "restaurant", "cafe", "salon", "health", "education", "tourism", "automotive", "professional", "agriculture", "manufacturing", "electronics"}
+    industry_specific = category in {"grocery", "clothing", "restaurant", "cafe", "salon", "laundry", "tailoring", "health", "veterinary", "education", "tourism", "travel", "automotive", "carwash", "professional", "agriculture", "farm_supply", "manufacturing", "construction", "electronics"}
     industry_terms = {
         "grocery": ("retail",), "clothing": ("retail",), "electronics": ("retail", "technology"),
         "restaurant": ("food", "hospitality"), "cafe": ("food", "hospitality"),
-        "salon": ("personal", "beauty", "service"), "health": ("health", "care", "medical"),
-        "education": ("education",), "tourism": ("tourism", "hospitality"),
-        "automotive": ("automotive", "auto", "vehicle"), "professional": ("professional", "technology", "service", "it"),
-        "agriculture": ("agriculture", "farm"), "manufacturing": ("manufacturing", "trade", "industrial"),
+        "salon": ("personal", "beauty", "service"), "laundry": ("personal", "service"), "tailoring": ("personal", "service"),
+        "health": ("health", "care", "medical"), "veterinary": ("health", "care", "veterinary"),
+        "education": ("education",), "tourism": ("tourism", "hospitality"), "travel": ("tourism", "hospitality", "travel"),
+        "automotive": ("automotive", "auto", "vehicle"), "carwash": ("automotive", "auto", "vehicle"),
+        "professional": ("professional", "technology", "service", "it"),
+        "agriculture": ("agriculture", "farm"), "farm_supply": ("agriculture", "farm"),
+        "manufacturing": ("manufacturing", "trade", "industrial"), "construction": ("manufacturing", "trade", "industrial", "construction"),
     }
     expected_terms = industry_terms.get(category, ())
     industry_aligned = not expected_terms or "other" in request.industry.lower() or any(term in request.industry.lower() for term in expected_terms)
-    if category in {"agriculture", "manufacturing"}:
+    if category in {"agriculture", "farm_supply", "manufacturing"}:
         relevant_anchors = sum(1 for tags in tags_list if tags.get("landuse") in {"industrial", "farmland", "farmyard", "orchard", "vineyard"})
     elif category == "electronics":
         relevant_anchors = residential_count + employment_count + transit_count
-    elif category == "tourism":
+    elif category in {"tourism", "travel"}:
         relevant_anchors = tourism_count + transit_count
-    elif category == "automotive":
+    elif category in {"automotive", "carwash"}:
         relevant_anchors = transit_count + sum(1 for tags in tags_list if tags.get("amenity") in {"fuel", "parking"} or tags.get("landuse") == "industrial")
     elif category in {"professional"}:
         relevant_anchors = employment_count + transit_count
+    elif category == "construction":
+        relevant_anchors = employment_count + transit_count + sum(1 for tags in tags_list if tags.get("landuse") == "industrial")
     elif category == "education":
         relevant_anchors = residential_count + transit_count + schools_count
     else:
@@ -830,7 +982,9 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
         message = f"No nearby places tagged like {request.businessType} were found. This could mean an opportunity or incomplete map coverage; validate demand with prospective customers before investing."
     if industry_specific and not industry_aligned:
         message = f"The selected industry sector ({request.industry}) may not match the business type ({request.businessType}). Check the form selections. " + message
-    return {"status": status, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "mappedFeatureCount": total_features, "competitorCount": competitor_count, "nearbyShops": sum(1 for tags in tags_list if tags.get("shop")), "nearbyAmenities": sum(1 for tags in tags_list if tags.get("amenity")), "nearbyOffices": employment_count, "nearbyTransitFeatures": transit_count, "residentialAreaFeatures": residential_count, "schoolFeatures": schools_count, "tourismFeatures": tourism_count, "relevantAnchors": relevant_anchors, "industryMatchSupported": industry_specific, "resultLimit": 300, "source": "OpenStreetMap via Overpass API", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "OpenStreetMap is community-mapped and may omit businesses or features. Up to 300 mapped features were sampled in a 1 km radius; this is not a foot-traffic count, verified census, safety rating, or proof of customer demand.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this location-fit analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
+    result = {"status": status, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "mappedFeatureCount": total_features, "competitorCount": competitor_count, "nearbyShops": sum(1 for tags in tags_list if tags.get("shop")), "nearbyAmenities": sum(1 for tags in tags_list if tags.get("amenity")), "nearbyOffices": employment_count, "nearbyTransitFeatures": transit_count, "residentialAreaFeatures": residential_count, "schoolFeatures": schools_count, "tourismFeatures": tourism_count, "relevantAnchors": relevant_anchors, "industryMatchSupported": industry_specific, "resultLimit": 120, "source": f"OpenStreetMap via {used_endpoint}", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "OpenStreetMap is community-mapped and may omit businesses or features. Up to 120 mapped features were sampled in the selected radius; this is not a foot-traffic count, verified census, safety rating, or proof of customer demand.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this location-fit analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
+    LOCATION_ANALYSIS_CACHE[cache_key] = (time.monotonic(), result)
+    return result
 
 
 @app.get("/api/funder/programmes/active")

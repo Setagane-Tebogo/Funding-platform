@@ -1,68 +1,115 @@
 import { useEffect, useRef, useState } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import "./LocationPicker.css";
 
+const API = window.location.hostname === "localhost"
+  ? (import.meta.env.VITE_API_URL || "http://localhost:8080")
+  : "https://funding-platform-4vyt.onrender.com";
 const DEFAULT_CENTER = [-29.0, 24.0];
-let leafletPromise;
-function loadLeaflet() {
-  if (window.L) return Promise.resolve(window.L);
-  if (!leafletPromise) leafletPromise = new Promise((resolve, reject) => {
-    if (!document.querySelector("link[data-leaflet]")) { const link = document.createElement("link"); link.rel = "stylesheet"; link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"; link.dataset.leaflet = "true"; document.head.appendChild(link); }
-    const script = document.createElement("script"); script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"; script.async = true; script.onload = () => resolve(window.L); script.onerror = () => reject(new Error("Map library could not be loaded.")); document.head.appendChild(script);
-  });
-  return leafletPromise;
-}
 
 export default function LocationPicker({ value, onChange }) {
-  const mapElement = useRef(null); const mapRef = useRef(null); const markerRef = useRef(null); const onChangeRef = useRef(onChange);
-  const [query, setQuery] = useState(""); const [searching, setSearching] = useState(false); const [mapError, setMapError] = useState("");
+  const mapElement = useRef(null);
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
+  const onChangeRef = useRef(onChange);
+  const valueRef = useRef(value);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [mapError, setMapError] = useState("");
+
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+  useEffect(() => { valueRef.current = value; }, [value]);
+
   useEffect(() => {
-    let disposed = false;
-    loadLeaflet().then((L) => {
-      if (disposed || !mapElement.current || mapRef.current) return;
-      const initial = value?.latitude != null && value?.longitude != null ? [Number(value.latitude), Number(value.longitude)] : DEFAULT_CENTER;
-      const map = L.map(mapElement.current).setView(initial, value?.latitude != null ? 15 : 5); mapRef.current = map;
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
-      function setPin(latlng, label) {
-        if (!markerRef.current) markerRef.current = L.marker(latlng, { draggable: true }).addTo(map); else markerRef.current.setLatLng(latlng);
-        markerRef.current.off("dragend").on("dragend", (event) => setPin(event.target.getLatLng(), label));
-        const current = onChangeRef.current; current({ location: label || `${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`, latitude: latlng.lat, longitude: latlng.lng });
-      }
-      map.on("click", (event) => setPin(event.latlng));
-      if (value?.latitude != null && value?.longitude != null) setPin({ lat: Number(value.latitude), lng: Number(value.longitude) }, value.location);
-    }).catch((error) => { if (!disposed) setMapError(error.message); });
-    return () => { disposed = true; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; markerRef.current = null; } };
+    if (!mapElement.current || mapRef.current) return undefined;
+    const initialValue = valueRef.current;
+    const hasPin = initialValue?.latitude !== "" && initialValue?.longitude !== ""
+      && Number.isFinite(Number(initialValue?.latitude)) && Number.isFinite(Number(initialValue?.longitude));
+    const start = hasPin ? [Number(initialValue.latitude), Number(initialValue.longitude)] : DEFAULT_CENTER;
+    const map = L.map(mapElement.current, { scrollWheelZoom: false }).setView(start, hasPin ? 15 : 5);
+    mapRef.current = map;
+    const tiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors",
+    }).addTo(map);
+    tiles.on("tileerror", () => setMapError("Map tiles could not be loaded. Check your connection; you can still use place search."));
+    tiles.on("tileload", () => setMapError(""));
+
+    function placePin(latlng, label) {
+      if (!markerRef.current) markerRef.current = L.marker(latlng, { draggable: true }).addTo(map);
+      else markerRef.current.setLatLng(latlng);
+      markerRef.current.off("dragend").on("dragend", (event) => {
+        const point = event.target.getLatLng();
+        onChangeRef.current({ location: `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`, latitude: point.lat, longitude: point.lng });
+      });
+      onChangeRef.current({ location: label || `${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`, latitude: latlng.lat, longitude: latlng.lng });
+    }
+    map.on("click", (event) => { setResults([]); placePin(event.latlng); });
+    if (hasPin) placePin({ lat: start[0], lng: start[1] }, initialValue.location);
+    const resizeObserver = new ResizeObserver(() => map.invalidateSize());
+    resizeObserver.observe(mapElement.current);
+    requestAnimationFrame(() => map.invalidateSize());
+    return () => { resizeObserver.disconnect(); map.remove(); mapRef.current = null; markerRef.current = null; };
   }, []);
+
   useEffect(() => {
     const lat = Number(value?.latitude); const lon = Number(value?.longitude);
-    if (mapRef.current && Number.isFinite(lat) && Number.isFinite(lon) && value?.latitude !== "" && value?.longitude !== "") {
-      mapRef.current.setView([lat, lon], 15);
-      if (window.L) {
-        if (!markerRef.current) markerRef.current = window.L.marker([lat, lon], { draggable: true }).addTo(mapRef.current);
-        else markerRef.current.setLatLng([lat, lon]);
-        markerRef.current.off("dragend").on("dragend", (event) => { const point = event.target.getLatLng(); onChangeRef.current({ location: value.location || `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`, latitude: point.lat, longitude: point.lng }); });
-      }
-    }
-  }, [value?.latitude, value?.longitude]);
+    if (!mapRef.current || value?.latitude === "" || value?.longitude === "" || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    mapRef.current.setView([lat, lon], 15);
+    if (!markerRef.current) markerRef.current = L.marker([lat, lon], { draggable: true }).addTo(mapRef.current);
+    else markerRef.current.setLatLng([lat, lon]);
+    markerRef.current.off("dragend").on("dragend", (event) => {
+      const point = event.target.getLatLng();
+      onChangeRef.current({ location: `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`, latitude: point.lat, longitude: point.lng });
+    });
+  }, [value?.latitude, value?.longitude, value?.location]);
+
   async function search(event) {
-    event.preventDefault(); if (!query.trim()) return; setSearching(true); setMapError("");
+    event.preventDefault();
+    const text = query.trim();
+    if (text.length < 2) { setMapError("Enter at least two characters to search."); setResults([]); return; }
+    setSearching(true); setMapError(""); setResults([]);
     try {
-      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query.trim())}`, { headers: { Accept: "application/json" } });
-      if (!response.ok) throw new Error("Location search is temporarily unavailable. You can still click the map to place a pin.");
-      const results = await response.json(); if (!results.length) throw new Error("No matching place found. Try a nearby suburb, town, or street.");
-      const result = results[0]; const latlng = { lat: Number(result.lat), lng: Number(result.lon) }; mapRef.current?.setView(latlng, 15);
-      if (mapRef.current && window.L) {
-        if (!markerRef.current) markerRef.current = window.L.marker(latlng, { draggable: true }).addTo(mapRef.current); else markerRef.current.setLatLng(latlng);
-        markerRef.current.off("dragend").on("dragend", (event) => { const point = event.target.getLatLng(); onChangeRef.current({ location: result.display_name, latitude: point.lat, longitude: point.lng }); });
-      }
-      onChange({ location: result.display_name, latitude: latlng.lat, longitude: latlng.lng });
-    } catch (error) { setMapError(error.message || "Could not search for that place."); } finally { setSearching(false); }
+      const token = sessionStorage.getItem("token");
+      const response = await fetch(`${API}/api/entrepreneur/location-search?q=${encodeURIComponent(text)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.detail || `Place search failed (HTTP ${response.status}).`);
+      if (!Array.isArray(data) || data.length === 0) throw new Error("No places found. Try adding the suburb, town, or province.");
+      setResults(data);
+    } catch (error) {
+      setMapError(error.message || "Place search is unavailable. You can still click the map to choose a point.");
+    } finally { setSearching(false); }
   }
+
+  function chooseResult(result) {
+    const point = [Number(result.latitude), Number(result.longitude)];
+    if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) { setMapError("This search result has no usable map coordinates."); return; }
+    mapRef.current?.setView(point, 16);
+    if (!markerRef.current) markerRef.current = L.marker(point, { draggable: true }).addTo(mapRef.current);
+    else markerRef.current.setLatLng(point);
+    markerRef.current.off("dragend").on("dragend", (event) => {
+      const selected = event.target.getLatLng();
+      onChangeRef.current({ location: `${selected.lat.toFixed(5)}, ${selected.lng.toFixed(5)}`, latitude: selected.lat, longitude: selected.lng });
+    });
+    onChange({ location: result.label, latitude: point[0], longitude: point[1] });
+    setResults([]); setMapError("");
+  }
+
   return <div className="location-picker">
-    <label className="location-search-label">Find a place <span>Search once, or click the map to place the pin.</span></label>
-    <form className="location-search" onSubmit={search}><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Suburb, town, or street address" aria-label="Search for a business location" /><button type="submit" disabled={searching}>{searching ? "Searching…" : "Find on map"}</button></form>
-    <div ref={mapElement} className="location-map" role="application" aria-label="Interactive map. Click to select a business location." />
+    <label className="location-search-label" htmlFor="business-location-search">Business location *</label>
+    <p className="location-help">Search for an address or place, choose a result, or click the map. Drag the pin to adjust it.</p>
+    <form className="location-search" onSubmit={search}>
+      <input id="business-location-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search suburb, town, or street address" autoComplete="street-address" />
+      <button type="submit" disabled={searching}>{searching ? "Searching…" : "Search places"}</button>
+    </form>
+    {results.length > 0 && <ul className="location-search-results" aria-label="Place search results">{results.map((result) => <li key={result.id}><button type="button" onClick={() => chooseResult(result)}>{result.label}</button></li>)}</ul>}
+    <div ref={mapElement} className="location-map" role="application" aria-label="Interactive map. Click to choose a business location." />
     {value?.location && <p className="selected-location"><strong>Selected:</strong> {value.location} ({Number(value.latitude).toFixed(5)}, {Number(value.longitude).toFixed(5)})</p>}
     {mapError && <p className="location-map-error" role="status">{mapError}</p>}
-    <small className="location-map-note">Map tiles and place search © OpenStreetMap contributors. Map data may be incomplete.</small>
+    <small className="location-map-note">Map and place data © OpenStreetMap contributors. Coverage may be incomplete.</small>
   </div>;
 }

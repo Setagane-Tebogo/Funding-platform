@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import asyncio
+import time
 import logging
 import json
 import math
@@ -655,6 +657,41 @@ async def analyse(request: AnalysisRequest, user: User = Depends(require_role("E
         if not profile:
             raise HTTPException(status_code=404, detail="Business profile not found")
     return result
+
+LOCATION_SEARCH_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+LOCATION_SEARCH_LOCK = asyncio.Lock()
+LOCATION_SEARCH_LAST_CALL = 0.0
+
+
+@app.get("/api/entrepreneur/location-search")
+async def search_business_location(q: str = Query(min_length=2, max_length=200), user: User = Depends(require_role("ENTREPRENEUR"))):
+    """Search South African addresses/places through Nominatim, with caching and rate spacing."""
+    global LOCATION_SEARCH_LAST_CALL
+    normalized = " ".join(q.split()).casefold()
+    cached = LOCATION_SEARCH_CACHE.get(normalized)
+    if cached and time.monotonic() - cached[0] < 86400:
+        return cached[1]
+    async with LOCATION_SEARCH_LOCK:
+        cached = LOCATION_SEARCH_CACHE.get(normalized)
+        if cached and time.monotonic() - cached[0] < 86400:
+            return cached[1]
+        delay = 1.0 - (time.monotonic() - LOCATION_SEARCH_LAST_CALL)
+        if delay > 0:
+            await asyncio.sleep(delay)
+        try:
+            contact = os.getenv("PUBLIC_GEOCODER_CONTACT", "")
+            user_agent = "FundBridge/1.0" + (f" ({contact})" if contact else "")
+            async with httpx.AsyncClient(timeout=12, headers={"User-Agent": user_agent, "Accept": "application/json"}) as client:
+                response = await client.get("https://nominatim.openstreetmap.org/search", params={"format": "jsonv2", "limit": 5, "countrycodes": "za", "addressdetails": 1, "q": q.strip()})
+                response.raise_for_status()
+                rows = response.json()
+            LOCATION_SEARCH_LAST_CALL = time.monotonic()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail="Place search is temporarily unavailable. You can still select the location by clicking the map.") from exc
+        results = [{"id": str(row.get("place_id", f"{row.get('lat')}:{row.get('lon')}")), "label": row.get("display_name", "South Africa location"), "latitude": float(row["lat"]), "longitude": float(row["lon"])} for row in rows if row.get("lat") and row.get("lon")]
+        LOCATION_SEARCH_CACHE[normalized] = (time.monotonic(), results)
+        return results
+
 
 @app.post("/api/entrepreneur/location-analysis")
 async def analyse_location(request: LocationAnalysisRequest, user: User = Depends(require_role("ENTREPRENEUR"))):

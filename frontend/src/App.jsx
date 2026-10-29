@@ -165,8 +165,8 @@ function App() {
   }
 
   if (!user) return <AuthPage onLogin={handleLogin} />;
-  if (user.role === "FUNDER") return <RolePage user={user} profile={accountProfile} onLogout={handleLogout}><FunderDashboard /></RolePage>;
-  if (user.role === "ADMIN") return <RolePage user={user} profile={accountProfile} onLogout={handleLogout}><AdminDashboard /></RolePage>;
+  if (user.role === "FUNDER") return <RolePage user={user} profile={accountProfile} onLogout={handleLogout}>{({ view, onViewChange }) => <FunderDashboard view={view} onViewChange={onViewChange} />}</RolePage>;
+  if (user.role === "ADMIN") return <RolePage user={user} profile={accountProfile} onLogout={handleLogout}>{({ view, onViewChange }) => <AdminDashboard view={view} onViewChange={onViewChange} />}</RolePage>;
 
   return (
     <div className="app-shell">
@@ -186,7 +186,88 @@ function App() {
 
 function RolePage({ user, profile, onLogout, children }) {
   const [showProfile, setShowProfile] = useState(false);
-  return <div className="app-shell"><main className="main-content"><header className="topbar"><div><span className="breadcrumb">FundBridge /</span><strong> Workspace</strong></div><div className="user-menu"><button type="button" className="profile-top-button" onClick={() => setShowProfile(true)}><div className="avatar">{profile?.avatar ? <img src={profile.avatar} alt="Profile" /> : (profile?.name || user.name || user.email).slice(0, 2).toUpperCase()}</div><span><strong>{profile?.name || user.name || user.email}</strong><small>{user.role}</small></span></button><button type="button" className="logout-button" onClick={onLogout}>Log out</button></div></header><section className="page-content">{showProfile ? <ProfilePage /> : children}</section></main></div>
+  const [menuOpen, setMenuOpen] = useState(false);
+  const navigationItems = user.role === "ADMIN"
+    ? [
+      { view: "overview", label: "Overview", icon: "overview" },
+      { view: "approvals", label: "Approvals", icon: "applications" },
+      { view: "programmes", label: "Programmes", icon: "funding" },
+      { view: "applications", label: "Applications", icon: "applications" },
+      { view: "users", label: "Users", icon: "profile" },
+    ]
+    : [
+      { view: "create", label: "Create programme", icon: "funding" },
+      { view: "programmes", label: "Programmes", icon: "funding" },
+      { view: "applications", label: "Applications", icon: "applications" },
+      { view: "proposals", label: "Saved proposals", icon: "business" },
+      { view: "messages", label: "Messages", icon: "messages" },
+      { view: "profile", label: "My profile", icon: "profile" },
+    ];
+  const defaultView = user.role === "ADMIN" ? "overview" : "create";
+  const [view, setView] = useState(() => {
+    const prefix = user.role === "ADMIN" ? "#admin-" : "#funder-";
+    const initialView = window.location.hash.startsWith(prefix) ? window.location.hash.slice(prefix.length) : defaultView;
+    return navigationItems.some((item) => item.view === initialView) ? initialView : defaultView;
+  });
+  const activeItem = navigationItems.find((item) => item.view === view);
+
+  function navigate(viewName) {
+    setView(viewName);
+    setMenuOpen(false);
+    setShowProfile(false);
+    const prefix = user.role === "ADMIN" ? "admin" : "funder";
+    window.history.replaceState({ fundbridge: true, page: viewName }, "", `#${prefix}-${viewName}`);
+  }
+
+  const dashboard = typeof children === "function"
+    ? children({ view, onViewChange: navigate })
+    : children;
+
+  return (
+    <div className="app-shell">
+      {menuOpen && <button type="button" className="sidebar-backdrop" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
+      <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
+        <button className="brand brand-button" onClick={() => navigate(defaultView)} aria-label="Go to dashboard">
+          <img src="/fundbridge-logo-transparent.png" alt="FundBridge" className="sidebar-logo" />
+        </button>
+        <p className="nav-label">{user.role === "ADMIN" ? "Administration" : "Organisation workspace"}</p>
+        <nav>
+          {navigationItems.map((item) => (
+            <button
+              key={item.view}
+              className={`nav-item ${view === item.view && !showProfile ? "active" : ""}`}
+              onClick={() => navigate(item.view)}
+            >
+              <span className="nav-icon"><NavigationIcon name={item.icon} /></span>
+              {item.label}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <span className="help-icon" aria-hidden="true">?</span>
+          <div><strong>Need a hand?</strong><p>We’re here to help.</p></div>
+        </div>
+      </aside>
+      <main className="main-content">
+        <header className="topbar">
+          <div className="topbar-title">
+            <button type="button" className="menu-toggle" aria-label={menuOpen ? "Close navigation" : "Open navigation"} onClick={() => setMenuOpen((open) => !open)}>
+              <span></span><span></span><span></span>
+            </button>
+            <div><span className="breadcrumb">Workspace /</span><strong> {showProfile ? "My profile" : activeItem?.label}</strong></div>
+          </div>
+          <div className="user-menu">
+            <button type="button" className="profile-top-button" onClick={() => { setShowProfile(true); setMenuOpen(false); }}>
+              <div className="avatar">{profile?.avatar ? <img src={profile.avatar} alt="Profile" /> : (profile?.name || user.name || user.email).slice(0, 2).toUpperCase()}</div>
+              <span><strong>{profile?.name || user.name || user.email}</strong><small>{user.role}</small></span>
+            </button>
+            <button type="button" className="logout-button" onClick={onLogout}>Log out</button>
+          </div>
+        </header>
+        <section className="page-content">{showProfile ? <ProfilePage /> : dashboard}</section>
+      </main>
+    </div>
+  );
 }
 
 export default App;

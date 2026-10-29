@@ -1264,3 +1264,149 @@ footer {
     font-size: 11px;
   }
 }
+
+.role-dashboard {
+  color: var(--ink);
+}
+
+.role-dashboard .dashboard-hero {
+  margin-bottom: 26px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.role-dashboard .dashboard-hero .eyebrow {
+  color: var(--green);
+}
+
+.role-dashboard .dashboard-hero h1 {
+  color: var(--ink);
+  font-size: clamp(27px, 3.2vw, 34px);
+  font-weight: 600;
+  letter-spacing: -.03em;
+  line-height: 1.12;
+}
+
+.role-dashboard .dashboard-hero .subtitle {
+  max-width: 620px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.role-dashboard .dashboard-tabs,
+.role-dashboard .funder-menu-toggle {
+  display: none;
+}
+
+.role-dashboard .content-panel {
+  margin-top: 24px;
+}
+
+.role-dashboard .content-panel > h2,
+.role-dashboard .funder-create-page > h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -.025em;
+}
+
+.role-dashboard .content-panel > .subtitle,
+.role-dashboard .funder-create-page > .subtitle {
+  color: var(--muted);
+}
+
+.role-dashboard .dashboard-stats {
+  margin-top: 24px;
+}
+
+.role-dashboard .stat-card {
+  border-color: var(--line);
+  border-radius: 9px;
+  background: var(--white);
+  box-shadow: none;
+}
+
+.role-dashboard .stat-top {
+  color: var(--muted);
+}
+
+.role-dashboard .stat-card p,
+.role-dashboard .admin-card p,
+.role-dashboard .admin-card small,
+.role-dashboard .programme-card p,
+.role-dashboard .programme-card small,
+.role-dashboard .application-card-top small,
+.role-dashboard .application-card > small {
+  color: var(--muted);
+}
+
+.role-dashboard .admin-list {
+  gap: 10px;
+}
+
+.role-dashboard .admin-card {
+  border-color: var(--line);
+  border-radius: 8px;
+  background: var(--white);
+}
+
+.role-dashboard .admin-card strong,
+.role-dashboard .admin-card > div > strong {
+  color: var(--ink);
+}
+
+.role-dashboard .admin-count {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.role-dashboard .role-form label {
+  color: #39483e;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.role-dashboard .role-form input,
+.role-dashboard .role-form textarea,
+.role-dashboard .list-tools input,
+.role-dashboard .list-tools select,
+.role-dashboard .admin-actions select {
+  border-color: #cbd4c8;
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--ink);
+}
+
+.role-dashboard .role-form input::placeholder,
+.role-dashboard .role-form textarea::placeholder,
+.role-dashboard .list-tools input::placeholder {
+  color: #59665d;
+  opacity: 1;
+}
+
+.role-dashboard .role-form input:focus,
+.role-dashboard .role-form textarea:focus,
+.role-dashboard .list-tools input:focus,
+.role-dashboard .list-tools select:focus,
+.role-dashboard .admin-actions select:focus {
+  border-color: #718b69;
+  box-shadow: 0 0 0 3px #e8eee3;
+  outline: 0;
+}
+
+.role-dashboard .programme-card {
+  border-color: var(--line);
+  border-radius: 9px;
+  background: var(--white);
+}
+
+.role-dashboard .profile-message {
+  margin-top: 18px;
+}
+
+.role-dashboard .funder-navigation {
+  display: none;
+}

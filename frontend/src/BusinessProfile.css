@@ -206,48 +206,40 @@
 }
 
 .business-delete-modal {
+  width: min(390px, 100%);
+  padding: 24px;
   border: 1px solid #e5e5dc;
   border-radius: 12px;
   color: #1d2b22;
-  text-align: left;
-}
-
-.business-delete-modal .confirm-icon {
-  width: 42px;
-  height: 42px;
-  margin: 0 0 18px;
-  background: #fff0ef;
-  color: #a52b2b;
-}
-
-.business-delete-modal .profile-eyebrow {
-  margin: 0;
-  color: #59665d;
+  text-align: center;
 }
 
 .business-delete-modal h2 {
-  margin: 8px 0;
+  margin: 0 0 10px;
   color: #1d2b22;
-  font-size: 24px;
+  font-size: 21px;
 }
 
-.business-delete-modal > p:not(.profile-eyebrow) {
-  margin: 0 0 24px;
+.business-delete-modal > p {
+  margin: 0 0 20px;
   color: #59665d;
-  line-height: 1.6;
+  line-height: 1.5;
 }
 
-.business-delete-modal > p strong {
+.business-delete-modal p strong {
   color: #1d2b22;
 }
 
 .business-delete-modal .modal-actions {
-  justify-content: flex-end;
+  justify-content: center;
+  gap: 8px;
 }
 
 .business-delete-modal .modal-actions button {
   width: auto;
-  min-width: 130px;
+  min-width: 88px;
+  min-height: 40px;
+  padding: 9px 14px;
 }
 
 .business-delete-modal .danger-button {

@@ -260,6 +260,15 @@ class AnalysisRequest(BaseModel):
     industry: str = ""
     businessDescription: str = ""
     businessStage: str = ""
+    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
+
+
+class LocationAnalysisRequest(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    industry: str = Field(min_length=1, max_length=255)
+    radiusMeters: int = Field(default=1000, ge=250, le=3000)
 
 
 class ModelPredictionRequest(BaseModel):
@@ -646,6 +655,74 @@ async def analyse(request: AnalysisRequest, user: User = Depends(require_role("E
         if not profile:
             raise HTTPException(status_code=404, detail="Business profile not found")
     return result
+
+@app.post("/api/entrepreneur/location-analysis")
+async def analyse_location(request: LocationAnalysisRequest, user: User = Depends(require_role("ENTREPRENEUR"))):
+    """Summarise nearby mapped business and access features; this is not a safety verdict."""
+    lat, lon, radius = request.latitude, request.longitude, request.radiusMeters
+    query = f"""[out:json][timeout:15];
+    (nwr(around:{radius},{lat},{lon})[shop];
+     nwr(around:{radius},{lat},{lon})[amenity];
+     nwr(around:{radius},{lat},{lon})[office];
+     nwr(around:{radius},{lat},{lon})[tourism];
+     nwr(around:{radius},{lat},{lon})[public_transport];
+     nwr(around:{radius},{lat},{lon})[industrial];
+     nwr(around:{radius},{lat},{lon})[landuse=industrial];);
+    out center tags 150;"""
+    try:
+        async with httpx.AsyncClient(timeout=20, headers={"User-Agent": "FundBridge/1.0 (business location suitability)"}) as client:
+            response = await client.post("https://overpass-api.de/api/interpreter", data={"data": query})
+            response.raise_for_status()
+            elements = response.json().get("elements", [])
+    except Exception:
+        return {"status": "unavailable", "verdict": "Location data unavailable", "message": "Nearby map data could not be retrieved. Try again later or check the area locally.", "industry": request.industry, "radiusMeters": radius, "source": "OpenStreetMap via Overpass API", "safety": {"status": "not_assessed", "message": "Safety is not assessed. Nearby map features cannot establish whether a place is safe."}, "coordinates": {"latitude": lat, "longitude": lon}}
+
+    tags_list = [item.get("tags", {}) for item in elements]
+    industry = request.industry.lower()
+    supported_industry = any(word in industry for word in ("grocery", "supermarket", "convenience", "food shop", "retail", "shop", "restaurant", "food", "cafe", "catering", "health", "medical", "clinic", "pharmacy", "education", "school", "training", "tourism", "hotel", "accommodation", "hospitality", "agriculture", "farm", "manufactur", "industrial", "factory", "technology", "software", "computer", "it services"))
+    def matches(tags):
+        shop, amenity, office, tourism = (tags.get(key, "").lower() for key in ("shop", "amenity", "office", "tourism"))
+        if any(word in industry for word in ("grocery", "supermarket", "convenience", "food shop")):
+            return shop in {"supermarket", "convenience", "bakery", "butcher", "greengrocer", "deli"}
+        if "retail" in industry or "shop" in industry:
+            return bool(shop)
+        if any(word in industry for word in ("restaurant", "food", "cafe", "catering")):
+            return amenity in {"restaurant", "cafe", "fast_food", "food_court", "bar"}
+        if any(word in industry for word in ("health", "medical", "clinic", "pharmacy")):
+            return amenity in {"clinic", "doctors", "dentist", "hospital", "pharmacy"} or shop == "chemist"
+        if any(word in industry for word in ("education", "school", "training")):
+            return amenity in {"school", "college", "university", "kindergarten", "library"}
+        if any(word in industry for word in ("tourism", "hotel", "accommodation", "hospitality")):
+            return bool(tourism) or amenity in {"restaurant", "cafe", "bar"}
+        if any(word in industry for word in ("agriculture", "farm")):
+            return tags.get("landuse") in {"farmland", "farmyard", "orchard", "vineyard"} or shop == "farm"
+        if any(word in industry for word in ("manufactur", "industrial", "factory")):
+            return tags.get("landuse") == "industrial" or bool(tags.get("industrial"))
+        if any(word in industry for word in ("technology", "software", "computer", "it services")):
+            return office in {"it", "company", "coworking"} or shop == "computer"
+        return False
+
+    industry_matches = sum(1 for tags in tags_list if matches(tags))
+    shop_count = sum(1 for tags in tags_list if tags.get("shop"))
+    service_count = sum(1 for tags in tags_list if tags.get("amenity") or tags.get("office"))
+    transit_count = sum(1 for tags in tags_list if tags.get("public_transport") or tags.get("highway") in {"bus_stop", "platform"})
+    if not supported_industry:
+        status, verdict = "industry_unsupported", "Industry comparison unavailable"
+        message = "The current map matching rules do not cover this industry yet. Nearby features are shown as context only; this is not a finding that the location is unsuitable."
+    elif not elements:
+        status, verdict = "limited_data", "Limited map evidence"
+        message = "No relevant features were found in the mapped data for this radius. This may mean the area is under-mapped; it is not proof that the location is unsuitable."
+    elif industry_matches >= 8:
+        status, verdict = "mixed_evidence", "Established activity, with competition to investigate"
+        message = f"The map lists {industry_matches} nearby places matching this industry. That may indicate an existing customer market, but it also means you should compare prices and differentiate your offer."
+    elif industry_matches >= 1:
+        status, verdict = "some_evidence", "Some nearby industry activity"
+        message = f"The map lists {industry_matches} nearby place(s) matching this industry. This is a useful signal to investigate, not proof of customer demand or business success."
+    else:
+        status, verdict = "limited_evidence", "Limited mapped activity for this industry"
+        message = "No nearby places tagged for this industry were found. Map coverage may be incomplete, so validate demand with local customers before deciding."
+    return {"status": status, "verdict": verdict, "message": message, "industry": request.industry, "radiusMeters": radius, "mappedFeatureCount": len(elements), "nearbyShops": shop_count, "nearbyServices": service_count, "nearbyTransitFeatures": transit_count, "industryMatches": industry_matches if supported_industry else None, "industryMatchSupported": supported_industry, "resultLimit": 150, "source": "OpenStreetMap via Overpass API", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "OpenStreetMap is community-mapped and may omit businesses or features. This response samples at most 150 mapped features; counts are approximate and are not a measure of foot traffic, customer demand, or safety.", "safety": {"status": "not_assessed", "message": "Safety is not assessed. No address-level safety data was used; mapped businesses and amenities do not prove an area is safe."}, "coordinates": {"latitude": lat, "longitude": lon}}
+
 
 @app.get("/api/funder/programmes/active")
 @app.get("/api/funder/programmes/active/")

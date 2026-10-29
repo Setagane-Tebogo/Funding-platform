@@ -290,6 +290,7 @@
 .viability-summary h3 { margin: 0 0 6px; font-size: 22px; }
 .viability-summary p { margin: 6px 0; line-height: 1.5; }
 .viability-prediction { color: #18593d; font-weight: 800; }
+.viability-score-cap { padding: 10px 12px; border-left: 4px solid #b45309; border-radius: 4px; background: #fff7ed; color: #713f12; }
 .viability-confidence { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 14px; font-size: 13px; }
 .viability-confidence span, .viability-score-hero small { color: #5c6b61; }
 .viability-financials, .viability-categories, .viability-two-column > div, .viability-recommendations, .viability-insights { padding: 18px; border: 1px solid #e1e7e2; border-radius: 12px; background: #fff; }

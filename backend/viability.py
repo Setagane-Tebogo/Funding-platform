@@ -463,6 +463,9 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
     elif revenue <= 0:
         financial_score = 20 if expenses > 0 else 45
         financial_reason = "No monthly revenue is entered; profit potential cannot be established from the current figures."
+    elif expenses <= 0:
+        financial_score = 45
+        financial_reason = "Monthly expenses are entered as zero; the profit margin may be overstated until operating costs are included."
     else:
         financial_score = _clamp(50 + float(profit_margin) * 125)
         financial_reason = f"Entered figures show monthly {'profit' if monthly_profit > 0 else 'loss' if monthly_profit < 0 else 'break-even'} of R{monthly_profit:,.2f} and a {float(profit_margin) * 100:.1f}% margin before tax and unlisted costs."
@@ -537,12 +540,36 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
             "operationalReadiness": "Operational readiness and business experience",
             "riskResilience": "Risk management and resilience",
         }[key], "weight": weight, "score": round(score), "contribution": round(score * weight / 100, 2), "explanation": explanation})
-    overall = max(0, min(100, round(sum(item["contribution"] for item in categories))))
+    weighted_score = max(0, min(100, round(sum(item["contribution"] for item in categories))))
+    score_cap = 100
+    score_cap_reasons = []
+    if not financial_provided:
+        score_cap = min(score_cap, 64)
+        score_cap_reasons.append("Monthly revenue and expenses are incomplete, so strong profitability cannot be confirmed.")
+    elif monthly_profit < 0:
+        score_cap = min(score_cap, 39)
+        score_cap_reasons.append(f"The entered monthly figures show a loss of R{abs(monthly_profit):,.2f}.")
+    elif monthly_profit == 0:
+        score_cap = min(score_cap, 49)
+        score_cap_reasons.append("The entered monthly figures only break even and do not show profit.")
+    elif profit_margin is not None and 0 < profit_margin < 0.05:
+        score_cap = min(score_cap, 64)
+        score_cap_reasons.append("The entered profit margin is below 5%, leaving little room for unlisted costs or sales changes.")
+    if financial_provided and revenue > 0 and expenses <= 0:
+        score_cap = min(score_cap, 49)
+        score_cap_reasons.append("Monthly expenses are entered as zero; rent, stock, wages, utilities, transport, or other costs may be missing.")
+    if capital_complete and funding_gap > 0:
+        score_cap = min(score_cap, 59)
+        score_cap_reasons.append(f"The entered available capital and funding leave a startup-cost gap of R{funding_gap:,.2f}.")
+    if _present(values, "availableCapital") and expenses > 0 and available / expenses < 1:
+        score_cap = min(score_cap, 59)
+        score_cap_reasons.append("Available capital covers less than one month of the entered operating expenses.")
+    overall = min(weighted_score, score_cap)
     band = "Strong potential" if overall >= 80 else "Promising, with areas to improve" if overall >= 65 else "Moderate potential, significant risks present" if overall >= 50 else "High risk" if overall >= 30 else "Very high risk"
 
     missing = []
     field_checks = [
-        (financial_provided, "Expected monthly revenue and expenses"),
+        (financial_provided and not (revenue > 0 and expenses <= 0), "Expected monthly revenue and expenses, including all operating costs"),
         (capital_complete, "Startup costs, available capital, and funding required"),
         (bool(target_market), "Target customers and local demand evidence"),
         (bool(experience), "Relevant owner or team experience"),
@@ -585,6 +612,9 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
     if financial_provided and monthly_profit <= 0:
         risks.append("Entered expenses meet or exceed the entered monthly revenue.")
         recommendations.append("Recheck pricing, sales volume, and all monthly costs; validate prices with suppliers and customers.")
+    if financial_provided and revenue > 0 and expenses <= 0:
+        risks.append("No monthly operating expenses are entered, so the apparent profit may be overstated.")
+        recommendations.append("Enter realistic rent, stock, wages, utilities, transport, and other recurring costs before relying on the score.")
     if funding_gap > 0:
         risks.append(f"The entered capital and funding leave a startup-cost gap of R{funding_gap:,.2f}.")
         recommendations.append("Reduce setup costs, stage the launch, or identify a confirmed source for the funding gap.")
@@ -622,6 +652,8 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
         "location": values.get("location") or "",
         "businessStage": values.get("businessStage") or "",
         "score": overall,
+        "weightedScoreBeforeRiskCaps": weighted_score,
+        "scoreCap": {"applied": score_cap < weighted_score, "maximum": score_cap if score_cap < 100 else None, "reasons": score_cap_reasons},
         "band": band,
         "prediction": prediction,
         "predictionDisclaimer": "Indicative screening result, not a statistical probability or guarantee of profitability.",

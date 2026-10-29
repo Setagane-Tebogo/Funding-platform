@@ -11,7 +11,7 @@ BASE = {
     "location": "Rural Limpopo",
     "businessStage": "Operating",
     "startupCosts": 100000,
-    "availableCapital": 40000,
+    "availableCapital": 100000,
     "fundingRequired": 60000,
     "monthlyRevenue": 80000,
     "monthlyExpenses": 60000,
@@ -46,6 +46,39 @@ class ViabilityAssessmentTests(unittest.TestCase):
         self.assertEqual(result["financials"]["fundingGap"], 80000)
         self.assertIn("High risk", result["prediction"])
         self.assertTrue(result["risks"])
+        self.assertLessEqual(result["score"], 39)
+
+    def test_positive_location_cannot_hide_a_monthly_loss(self):
+        values = {**BASE, "monthlyRevenue": 100000, "monthlyExpenses": 125000}
+        strong_location = {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 200, "relevantAnchors": 10, "nearbyTransitFeatures": 10, "competitorCount": 0}
+        result = build_business_viability(values, strong_location)
+        self.assertLessEqual(result["score"], 39)
+        self.assertGreater(result["weightedScoreBeforeRiskCaps"], result["score"])
+        self.assertEqual(result["band"], "High risk")
+        self.assertIn("show a loss", result["scoreCap"]["reasons"][0])
+
+    def test_break_even_and_underfunded_projections_receive_score_limits(self):
+        break_even = build_business_viability({**BASE, "monthlyRevenue": 50000, "monthlyExpenses": 50000}, {})
+        underfunded = build_business_viability({**BASE, "availableCapital": 1000, "fundingRequired": 1000}, {})
+        self.assertLessEqual(break_even["score"], 49)
+        self.assertLessEqual(underfunded["score"], 59)
+        self.assertTrue(break_even["scoreCap"]["applied"])
+        self.assertTrue(underfunded["scoreCap"]["applied"])
+
+    def test_missing_monthly_financials_cannot_receive_a_strong_score(self):
+        values = {**BASE, "providedInputs": ["startupCosts", "availableCapital", "fundingRequired"]}
+        strong_location = {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 200, "relevantAnchors": 10, "nearbyTransitFeatures": 10, "competitorCount": 0}
+        result = build_business_viability(values, strong_location)
+        self.assertLessEqual(result["score"], 64)
+        self.assertTrue(result["scoreCap"]["applied"])
+        self.assertIn("incomplete", result["scoreCap"]["reasons"][0])
+
+    def test_zero_expenses_do_not_produce_a_strong_profitability_score(self):
+        values = {**BASE, "monthlyRevenue": 90000, "monthlyExpenses": 0}
+        result = build_business_viability(values, {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 200, "relevantAnchors": 10, "nearbyTransitFeatures": 10, "competitorCount": 0})
+        self.assertLessEqual(result["score"], 49)
+        self.assertIn("Monthly expenses are entered as zero", " ".join(result["scoreCap"]["reasons"]))
+        self.assertTrue(any("No monthly operating expenses" in risk for risk in result["risks"]))
 
     def test_missing_financials_use_neutral_score_and_reduce_confidence(self):
         values = {"businessTypeCategory": "agriculture", "providedInputs": []}
@@ -162,6 +195,7 @@ class ViabilityAssessmentTests(unittest.TestCase):
         values = {**BASE, "monthlyRevenue": 20000, "monthlyExpenses": 20000}
         result = build_business_viability(values, {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 8, "relevantAnchors": 4, "competitorCount": 2})
         self.assertEqual(result["prediction"], "High risk of not becoming profitable")
+        self.assertLessEqual(result["score"], 49)
 
     def test_industry_guidance_varies_by_sector(self):
         agriculture = build_business_viability({**BASE, "businessTypeCategory": "agriculture"}, {})

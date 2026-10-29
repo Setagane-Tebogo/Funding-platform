@@ -1410,3 +1410,69 @@ footer {
 .role-dashboard .funder-navigation {
   display: none;
 }
+
+.app-confirm-backdrop {
+  z-index: 80;
+}
+
+.app-confirm-dialog {
+  width: min(390px, 100%);
+  padding: 24px;
+  color: var(--ink);
+  text-align: center;
+}
+
+.app-confirm-dialog h2 {
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-size: 21px;
+}
+
+.app-confirm-dialog > p {
+  margin: 0 0 20px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.app-confirm-dialog > .app-confirm-error {
+  margin-top: -8px;
+  color: #a52b2b;
+}
+
+.app-confirm-dialog .modal-actions {
+  justify-content: center;
+  gap: 8px;
+}
+
+.app-confirm-dialog .modal-actions button {
+  width: auto;
+  min-width: 88px;
+  min-height: 40px;
+  padding: 9px 14px;
+}
+
+.app-confirm-dialog .danger-button {
+  border-color: #a52b2b;
+  background: #a52b2b;
+  color: #fff;
+}
+
+.app-confirm-dialog .danger-button:hover:not(:disabled) {
+  border-color: #842020;
+  background: #842020;
+}
+
+.app-confirm-dialog button:disabled {
+  cursor: wait;
+  opacity: .7;
+}
+
+@media (max-width: 480px) {
+  .app-confirm-dialog .modal-actions {
+    flex-direction: column-reverse;
+  }
+
+  .app-confirm-dialog .modal-actions button {
+    width: 100%;
+  }
+}

@@ -277,3 +277,45 @@
 .suitability-score p { line-height: 1.5; }
 .suitability-score ul { margin-bottom: 10px; }
 .suitability-score small { color: #59665d; line-height: 1.5; }
+.assessment-extra-fields { display: grid; grid-column: 1 / -1; gap: 16px; padding: 14px 16px; border: 1px solid #e1e6e2; border-radius: 10px; background: #fbfdfb; }
+.assessment-extra-fields > summary, .viability-dashboard details > summary { cursor: pointer; color: #174c35; font-weight: 700; }
+.assessment-extra-fields[open] > summary { margin-bottom: 4px; }
+.viability-dashboard { display: grid; gap: 18px; color: #26372e; }
+.viability-dashboard h3 { margin: 0 0 12px; font-size: 17px; color: #173f2f; }
+.viability-score-hero { display: grid; grid-template-columns: 170px minmax(0, 1fr); align-items: center; gap: 24px; padding: 24px; border: 1px solid #d9e7dd; border-radius: 14px; background: linear-gradient(120deg, #f3f8f4, #fff); }
+.viability-gauge { display: grid; width: 150px; height: 150px; place-items: center; border-radius: 50%; background: conic-gradient(#1d6847 var(--score-angle), #e2e9e4 0); }
+.viability-gauge > div { display: grid; align-content: center; justify-items: center; width: 116px; height: 116px; border-radius: 50%; background: #fff; }
+.viability-gauge strong { color: #174c35; font-size: 42px; line-height: 1; }
+.viability-gauge span { color: #637067; font-size: 13px; }
+.viability-summary h3 { margin: 0 0 6px; font-size: 22px; }
+.viability-summary p { margin: 6px 0; line-height: 1.5; }
+.viability-prediction { color: #18593d; font-weight: 800; }
+.viability-confidence { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 14px; font-size: 13px; }
+.viability-confidence span, .viability-score-hero small { color: #5c6b61; }
+.viability-financials, .viability-categories, .viability-two-column > div, .viability-recommendations, .viability-insights { padding: 18px; border: 1px solid #e1e7e2; border-radius: 12px; background: #fff; }
+.viability-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.viability-metric-grid > div { display: grid; gap: 5px; padding: 12px; border-radius: 9px; background: #f5f8f5; }
+.viability-metric-grid span, .viability-category span { color: #657168; font-size: 12px; }
+.viability-metric-grid strong { overflow-wrap: anywhere; color: #1b4632; font-size: 18px; }
+.viability-category { padding: 13px 0; border-top: 1px solid #edf0ed; }
+.viability-category > div:first-child { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 12px; }
+.viability-category > p { margin: 8px 0 0; color: #526057; font-size: 13px; line-height: 1.5; }
+.viability-progress { height: 8px; margin-top: 8px; overflow: hidden; border-radius: 8px; background: #e7ede8; }
+.viability-progress span { display: block; height: 100%; border-radius: inherit; background: #2d8059; }
+.viability-two-column { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.viability-two-column ul, .viability-recommendations ol { margin: 0; padding-left: 20px; }
+.viability-two-column li, .viability-recommendations li { margin: 8px 0; color: #45544a; line-height: 1.5; }
+.viability-insights small, .viability-sources { color: #59665d; line-height: 1.5; }
+.viability-dashboard details { padding: 14px 16px; border: 1px solid #e1e7e2; border-radius: 10px; background: #fff; }
+.viability-dashboard details > summary { margin: 0; }
+.viability-dashboard details > p { line-height: 1.5; }
+.viability-dashboard details li { margin: 8px 0; line-height: 1.45; }
+.viability-dashboard a { color: #17653f; }
+@media (max-width: 700px) {
+  .viability-score-hero { grid-template-columns: 1fr; justify-items: start; padding: 18px; }
+  .viability-gauge { width: 126px; height: 126px; }
+  .viability-gauge > div { width: 98px; height: 98px; }
+  .viability-gauge strong { font-size: 34px; }
+  .viability-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .viability-two-column { grid-template-columns: 1fr; }
+}

@@ -6,6 +6,7 @@ import time
 import logging
 import json
 import math
+import hashlib
 from pathlib import Path
 import httpx
 import smtplib
@@ -26,6 +27,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, create_engine, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
+
+from viability import build_business_viability
 
 
 class Settings(BaseSettings):
@@ -137,6 +140,17 @@ class BusinessProfile(Base):
     analysis_result: Mapped[Optional[str]] = mapped_column(Text)
 
 
+class BusinessAssessment(Base):
+    __tablename__ = "business_assessments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    profile_id: Mapped[Optional[int]] = mapped_column(ForeignKey("business_profiles.id", ondelete="CASCADE"), index=True)
+    business_key: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    score: Mapped[int] = mapped_column(nullable=False)
+    assessment_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
 class FunderOrganisation(Base):
     __tablename__ = "funder_organisations"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -246,6 +260,35 @@ class ProfileRequest(BaseModel):
     fundingNeeded: Optional[Decimal] = None
     intendedUseOfFunds: Optional[str] = None
     analysis: Optional[dict[str, Any]] = None
+
+
+class BusinessAssessmentRequest(BaseModel):
+    profileId: Optional[int] = None
+    businessName: str = ""
+    industry: str = ""
+    businessType: str = ""
+    businessTypeCategory: str = "other"
+    customBusinessType: str = ""
+    businessStage: str = ""
+    location: str = ""
+    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
+    businessDescription: str = ""
+    startupCosts: Optional[Decimal] = Field(default=None, ge=0)
+    availableCapital: Optional[Decimal] = Field(default=None, ge=0)
+    fundingRequired: Optional[Decimal] = Field(default=None, ge=0)
+    monthlyRevenue: Optional[Decimal] = Field(default=None, ge=0)
+    monthlyExpenses: Optional[Decimal] = Field(default=None, ge=0)
+    monthlyGrowthPercent: Optional[Decimal] = Field(default=None, ge=0)
+    totalAssets: Optional[Decimal] = Field(default=None, ge=0)
+    totalLiabilities: Optional[Decimal] = Field(default=None, ge=0)
+    customerCount: int = Field(default=0, ge=0)
+    employees: int = Field(default=0, ge=0)
+    targetMarket: str = ""
+    businessExperience: str = ""
+    operationsPlan: str = ""
+    riskMitigation: str = ""
+    providedInputs: list[str] = Field(default_factory=list)
 
 
 class AnalysisRequest(BaseModel):
@@ -563,8 +606,8 @@ def entrepreneur_dashboard(user: User = Depends(require_role("ENTREPRENEUR"))):
 
 @app.post("/api/entrepreneur/business-profile", status_code=201)
 def create_profile(request: ProfileRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
-    profile = BusinessProfile(user_id=user.id, business_name=request.businessName, industry=request.industry, business_stage=request.businessStage, description=request.description, location=request.location, funding_needed=request.fundingNeeded, intended_use_of_funds=request.intendedUseOfFunds, analysis_result=json.dumps(request.analysis, default=str) if request.analysis else None)
-    db.add(profile); db.commit(); db.refresh(profile)
+    profile = BusinessProfile(user_id=user.id, business_name=request.businessName, industry=request.industry, business_stage=request.businessStage, description=request.description, location=request.location, funding_needed=request.fundingNeeded, intended_use_of_funds=request.intendedUseOfFunds, analysis_result=profile_assessment_json(request.analysis) if request.analysis else None)
+    db.add(profile); db.flush(); link_pending_assessments(profile, request.analysis, db); db.commit(); db.refresh(profile)
     return profile_response(profile)
 
 
@@ -584,7 +627,8 @@ def get_profile(user: User = Depends(require_role("ENTREPRENEUR")), db: Session 
 def update_business_profile(profile_id: int, request: ProfileRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
     profile = db.scalar(select(BusinessProfile).where(BusinessProfile.id == profile_id, BusinessProfile.user_id == user.id))
     if not profile: raise HTTPException(status_code=404, detail="Business profile not found")
-    for key, value in {"business_name": request.businessName, "industry": request.industry, "business_stage": request.businessStage, "description": request.description, "location": request.location, "funding_needed": request.fundingNeeded, "intended_use_of_funds": request.intendedUseOfFunds, "analysis_result": json.dumps(request.analysis, default=str) if request.analysis else profile.analysis_result}.items(): setattr(profile, key, value)
+    for key, value in {"business_name": request.businessName, "industry": request.industry, "business_stage": request.businessStage, "description": request.description, "location": request.location, "funding_needed": request.fundingNeeded, "intended_use_of_funds": request.intendedUseOfFunds, "analysis_result": profile_assessment_json(request.analysis) if request.analysis else profile.analysis_result}.items(): setattr(profile, key, value)
+    link_pending_assessments(profile, request.analysis, db)
     db.commit(); db.refresh(profile); return profile_response(profile)
 
 
@@ -599,13 +643,33 @@ def delete_business_profile(profile_id: int, user: User = Depends(require_role("
 def update_profile(request: ProfileRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
     profile = db.scalar(select(BusinessProfile).where(BusinessProfile.user_id == user.id).order_by(BusinessProfile.updated_at.desc()))
     if not profile: raise HTTPException(status_code=404, detail="Business profile not found")
-    for key, value in {"business_name": request.businessName, "industry": request.industry, "business_stage": request.businessStage, "description": request.description, "location": request.location, "funding_needed": request.fundingNeeded, "intended_use_of_funds": request.intendedUseOfFunds, "analysis_result": json.dumps(request.analysis, default=str) if request.analysis else profile.analysis_result}.items(): setattr(profile, key, value)
+    for key, value in {"business_name": request.businessName, "industry": request.industry, "business_stage": request.businessStage, "description": request.description, "location": request.location, "funding_needed": request.fundingNeeded, "intended_use_of_funds": request.intendedUseOfFunds, "analysis_result": profile_assessment_json(request.analysis) if request.analysis else profile.analysis_result}.items(): setattr(profile, key, value)
+    link_pending_assessments(profile, request.analysis, db)
     db.commit(); db.refresh(profile)
     return profile_response(profile)
 
 
 def profile_response(profile: BusinessProfile) -> dict[str, Any]:
     return {"id": profile.id, "businessName": profile.business_name, "industry": profile.industry, "businessStage": profile.business_stage, "description": profile.description, "location": profile.location, "fundingNeeded": profile.funding_needed, "intendedUseOfFunds": profile.intended_use_of_funds, "createdAt": profile.created_at, "updatedAt": profile.updated_at, "analysis": json.loads(profile.analysis_result) if profile.analysis_result else None}
+
+
+def assessment_business_key(business_name: str, industry: str, business_type_category: str, location: str, business_type: str = "") -> str:
+    stable = "|".join(" ".join(value.split()).casefold() for value in (business_name, industry, business_type_category, business_type, location))
+    return hashlib.sha256(stable.encode("utf-8")).hexdigest()
+
+
+def link_pending_assessments(profile: BusinessProfile, assessment_data: Optional[dict[str, Any]], db: Session) -> None:
+    key = (assessment_data or {}).get("businessKey")
+    if key:
+        db.query(BusinessAssessment).filter(BusinessAssessment.user_id == profile.user_id, BusinessAssessment.profile_id.is_(None), BusinessAssessment.business_key == key).update({"profile_id": profile.id}, synchronize_session=False)
+
+
+def profile_assessment_json(assessment_data: Optional[dict[str, Any]]) -> Optional[str]:
+    if not assessment_data:
+        return None
+    safe_assessment = dict(assessment_data)
+    safe_assessment.pop("assessmentHistory", None)
+    return json.dumps(safe_assessment, default=str)
 
 
 async def grok_assessment(request: AnalysisRequest, deterministic: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -746,6 +810,8 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
             (("farm", "agriculture"), "agriculture"), (("construction", "builder", "plumber", "electrician"), "construction"),
             (("manufacturing", "workshop", "factory"), "manufacturing"),
             (("phone repair", "mobile phone", "electronics shop"), "electronics"),
+            (("taxi", "minibus", "passenger transport"), "transport"),
+            (("delivery", "logistics", "courier"), "logistics"),
         )
         for keywords, inferred_category in free_type_rules:
             if any(keyword in business_type for keyword in keywords):
@@ -783,6 +849,8 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
         "professional": '[office~"it|company|consulting|coworking|telecommunication"]',
         "agriculture": '[shop=farm]',
         "electronics": '[shop~"mobile_phone|electronics|computer"]',
+        "transport": ('[amenity~"taxi|bus_station"]', '[office=transport]'),
+        "logistics": ('[office~"logistics|transport"]', '[industrial=warehouse]'),
     }
     # Do not count industrial estates or farms as competing businesses.
     competitor_filter = competitor_filters.get(category)
@@ -839,6 +907,7 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
             "cafe": "cafe", "salon": "hair salon", "health": "pharmacy", "education": "school",
             "tourism": "hotel", "automotive": "car repair", "professional": "software company",
             "agriculture": "farm", "manufacturing": "factory", "electronics": "electronics shop",
+            "transport": "taxi service", "logistics": "delivery service",
             "laundry": "laundry", "tailoring": "tailor", "veterinary": "veterinary clinic",
             "travel": "travel agency", "carwash": "car wash", "farm_supply": "agricultural supply",
             "construction": "construction company",
@@ -892,6 +961,7 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
                     "education": ("education",), "tourism": ("tourism", "hospitality"),
                     "automotive": ("automotive", "auto", "vehicle"), "professional": ("professional", "technology", "service", "it"),
                     "agriculture": ("agriculture", "farm"), "manufacturing": ("manufacturing", "trade", "industrial"),
+                    "transport": ("transport",), "logistics": ("transport", "logistics"),
                 }
                 expected_industry_terms = fallback_industry_terms.get(category, ())
                 fallback_industry_aligned = not expected_industry_terms or "other" in request.industry.lower() or any(term in request.industry.lower() for term in expected_industry_terms)
@@ -929,6 +999,8 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
         if category == "agriculture": return shop == "farm"
         if category == "manufacturing": return bool(tags.get("industrial"))
         if category == "electronics": return shop in {"mobile_phone", "electronics", "computer"}
+        if category == "transport": return amenity in {"taxi", "bus_station"} or office == "transport"
+        if category == "logistics": return office in {"logistics", "transport"} or tags.get("industrial") == "warehouse"
         # Only use a free-text fallback for clearly recognizable types.
         if any(word in business_type for word in ("grocery", "supermarket", "convenience")): return shop in {"supermarket", "convenience", "bakery", "butcher", "greengrocer", "deli"}
         if "phone repair" in business_type or "mobile phone" in business_type: return shop in {"mobile_phone", "electronics", "computer"}
@@ -950,7 +1022,7 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
     transit_count = sum(1 for tags in tags_list if tags.get("public_transport") or tags.get("highway") == "bus_stop" or tags.get("railway") in {"station", "halt"})
     schools_count = sum(1 for tags in tags_list if tags.get("amenity") in {"school", "college", "university", "kindergarten"})
     tourism_count = sum(1 for tags in tags_list if tags.get("tourism") in {"attraction", "museum", "theme_park", "viewpoint", "hotel", "guest_house"})
-    industry_specific = category in {"grocery", "clothing", "restaurant", "cafe", "salon", "laundry", "tailoring", "health", "veterinary", "education", "tourism", "travel", "automotive", "carwash", "professional", "agriculture", "farm_supply", "manufacturing", "construction", "electronics"}
+    industry_specific = category in {"grocery", "clothing", "restaurant", "cafe", "salon", "laundry", "tailoring", "health", "veterinary", "education", "tourism", "travel", "automotive", "carwash", "professional", "agriculture", "farm_supply", "manufacturing", "construction", "electronics", "transport", "logistics"}
     industry_terms = {
         "grocery": ("retail",), "clothing": ("retail",), "electronics": ("retail", "technology"),
         "restaurant": ("food", "hospitality"), "cafe": ("food", "hospitality"),
@@ -960,6 +1032,7 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
         "automotive": ("automotive", "auto", "vehicle"), "carwash": ("automotive", "auto", "vehicle"),
         "professional": ("professional", "technology", "service", "it"),
         "agriculture": ("agriculture", "farm"), "farm_supply": ("agriculture", "farm"),
+        "transport": ("transport",), "logistics": ("transport", "logistics"),
         "manufacturing": ("manufacturing", "trade", "industrial"), "construction": ("manufacturing", "trade", "industrial", "construction"),
     }
     expected_terms = industry_terms.get(category, ())
@@ -978,6 +1051,8 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
         relevant_anchors = transit_count + sum(1 for tags in tags_list if tags.get("amenity") in {"fuel", "parking"} or tags.get("landuse") == "industrial")
     elif category in {"professional"}:
         relevant_anchors = employment_count + transit_count
+    elif category in {"transport", "logistics"}:
+        relevant_anchors = transit_count + employment_count + residential_count
     elif category == "construction":
         relevant_anchors = employment_count + transit_count + sum(1 for tags in tags_list if tags.get("landuse") == "industrial")
     elif category == "education":
@@ -1008,6 +1083,111 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
     result = {"status": status, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "mappedFeatureCount": total_features, "competitorCount": competitor_count, "nearbyShops": sum(1 for tags in tags_list if tags.get("shop")), "nearbyAmenities": sum(1 for tags in tags_list if tags.get("amenity")), "nearbyOffices": employment_count, "nearbyTransitFeatures": transit_count, "residentialAreaFeatures": residential_count, "schoolFeatures": schools_count, "tourismFeatures": tourism_count, "relevantAnchors": relevant_anchors, "industryMatchSupported": industry_specific, "resultLimit": 120, "contextDataAvailable": True, "contextNote": "Nearby mapped homes/places, shops, services, and transport are broad context indicators only. They are not customer counts, spending data, foot traffic, or proof of demand.", "source": f"OpenStreetMap via {used_endpoint}", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "OpenStreetMap is community-mapped and may omit businesses or features. Up to 120 mapped features were sampled in the selected radius; this is not a foot-traffic count, verified census, safety rating, or proof of customer demand.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this location-fit analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
     LOCATION_ANALYSIS_CACHE[cache_key] = (time.monotonic(), result)
     return result
+
+
+@app.post("/api/entrepreneur/business-assessments", status_code=201)
+async def create_business_assessment(request: BusinessAssessmentRequest, user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
+    profile = None
+    existing_analysis: dict[str, Any] = {}
+    if request.profileId:
+        profile = db.scalar(select(BusinessProfile).where(BusinessProfile.id == request.profileId, BusinessProfile.user_id == user.id))
+        if not profile:
+            raise HTTPException(status_code=404, detail="Business profile not found")
+        try:
+            existing_analysis = json.loads(profile.analysis_result or "{}")
+        except (TypeError, json.JSONDecodeError):
+            existing_analysis = {}
+    business_name = request.businessName.strip() or (profile.business_name if profile else "")
+    industry = request.industry.strip() or (profile.industry if profile else "")
+    business_type = request.businessType.strip()
+    business_type_category = request.businessTypeCategory.strip().lower() or "other"
+    business_stage = request.businessStage.strip() or (profile.business_stage if profile else "")
+    location = request.location.strip() or (profile.location if profile else "")
+    latitude = request.latitude
+    longitude = request.longitude
+    saved_coordinates = (existing_analysis.get("locationAnalysis") or {}).get("coordinates") or {}
+    if latitude is None:
+        latitude = saved_coordinates.get("latitude")
+    if longitude is None:
+        longitude = saved_coordinates.get("longitude")
+    if not business_name or not industry or not business_type or not location:
+        raise HTTPException(status_code=400, detail="Business name, industry, business type, and location are required for assessment.")
+    if latitude is None or longitude is None:
+        raise HTTPException(status_code=400, detail="Choose the business location on the map before assessment.")
+
+    user_profile = db.scalar(select(UserProfile).where(UserProfile.user_id == user.id))
+    experience_fallback = user_profile.bio if user_profile and user_profile.bio else ""
+    startup_costs = request.startupCosts
+    funding_required = request.fundingRequired
+    available_capital = request.availableCapital
+    if profile:
+        startup_costs = startup_costs if startup_costs is not None else (existing_analysis.get("financialInputs") or {}).get("startupCosts")
+        funding_required = funding_required if funding_required is not None else profile.funding_needed
+        available_capital = available_capital if available_capital is not None else (existing_analysis.get("financialInputs") or {}).get("cashOnHand")
+
+    location_request = LocationAnalysisRequest(latitude=latitude, longitude=longitude, industry=industry, businessType=business_type, businessTypeCategory=business_type_category, radiusMeters=5000)
+    location_analysis = await analyse_location(location_request, user)
+    provided = list(dict.fromkeys(request.providedInputs))
+    values = {
+        "businessName": business_name, "industry": industry, "businessType": business_type,
+        "businessTypeCategory": business_type_category, "location": location, "businessStage": business_stage,
+        "businessDescription": request.businessDescription or (profile.description if profile else ""),
+        "startupCosts": float(startup_costs or 0), "availableCapital": float(available_capital or 0),
+        "fundingRequired": float(funding_required or 0), "monthlyRevenue": float(request.monthlyRevenue or 0),
+        "monthlyExpenses": float(request.monthlyExpenses or 0), "monthlyGrowthPercent": float(request.monthlyGrowthPercent or 0),
+        "totalAssets": float(request.totalAssets or 0), "totalLiabilities": float(request.totalLiabilities or 0),
+        "customerCount": request.customerCount, "employees": request.employees,
+        "targetMarket": request.targetMarket, "businessExperience": request.businessExperience,
+        "operationsPlan": request.operationsPlan, "riskMitigation": request.riskMitigation,
+        "providedInputs": provided,
+    }
+    assessment = build_business_viability(values, location_analysis, experience_fallback)
+    business_key = assessment_business_key(business_name, industry, business_type_category, location, business_type)
+    now = datetime.now(timezone.utc).isoformat()
+    assessment["businessKey"] = business_key
+    assessment["createdAt"] = now
+    record = BusinessAssessment(user_id=user.id, profile_id=profile.id if profile else None, business_key=business_key, score=assessment["score"], assessment_json="{}")
+    db.add(record)
+    db.flush()
+    assessment["assessmentId"] = record.id
+    record.assessment_json = json.dumps(assessment, default=str)
+    financial_inputs = {"startupCosts": values["startupCosts"], "cashOnHand": values["availableCapital"], "fundingRequired": values["fundingRequired"], "monthlyRevenue": values["monthlyRevenue"], "monthlyExpenses": values["monthlyExpenses"], "monthlyGrowthPercent": values["monthlyGrowthPercent"], "totalAssets": values["totalAssets"], "totalLiabilities": values["totalLiabilities"], "customerCount": values["customerCount"], "employees": values["employees"], "providedFields": provided, "targetMarket": values["targetMarket"], "businessExperience": values["businessExperience"], "operationsPlan": values["operationsPlan"], "riskMitigation": values["riskMitigation"]}
+    latest = {"businessName": business_name, "industry": industry, "businessStage": business_stage, "location": location, "businessType": business_type, "businessTypeCategory": business_type_category, "customBusinessType": request.customBusinessType, "businessKey": business_key, "assessmentId": record.id, "outlook": assessment["prediction"], "estimatedMonthlyProfit": assessment["financials"]["monthlyProfit"], "estimatedBreakEvenMonths": assessment["financials"]["breakEvenMonths"], "financialInputs": financial_inputs, "locationAnalysis": location_analysis, "viabilityAssessment": assessment, "businessSuitability": {"score": assessment["score"], "label": assessment["band"], "explanation": assessment["prediction"]}}
+    if profile:
+        profile.analysis_result = json.dumps(latest, default=str)
+    db.commit()
+    recent_records = db.scalars(select(BusinessAssessment).where(BusinessAssessment.user_id == user.id, BusinessAssessment.business_key == business_key).order_by(BusinessAssessment.created_at.desc()).limit(10)).all()
+    return {**latest, "assessmentHistory": [assessment_history_item(item) for item in recent_records]}
+
+
+def assessment_history_item(record: BusinessAssessment) -> dict[str, Any]:
+    try:
+        assessment = json.loads(record.assessment_json)
+    except (TypeError, json.JSONDecodeError):
+        assessment = {}
+    return {"assessmentId": record.id, "createdAt": record.created_at.isoformat() if record.created_at else assessment.get("createdAt"), "score": record.score, "band": assessment.get("band"), "prediction": assessment.get("prediction"), "categoryScores": assessment.get("categoryScores", [])}
+
+
+@app.get("/api/entrepreneur/business-assessments")
+def list_business_assessments(profileId: Optional[int] = Query(default=None, ge=1), businessKey: Optional[str] = Query(default=None, min_length=64, max_length=64), user: User = Depends(require_role("ENTREPRENEUR")), db: Session = Depends(db_session)):
+    if profileId:
+        profile = db.scalar(select(BusinessProfile).where(BusinessProfile.id == profileId, BusinessProfile.user_id == user.id))
+        if not profile:
+            raise HTTPException(status_code=404, detail="Business profile not found")
+        try:
+            profile_analysis = json.loads(profile.analysis_result or "{}")
+        except (TypeError, json.JSONDecodeError):
+            profile_analysis = {}
+        businessKey = businessKey or profile_analysis.get("businessKey")
+        condition = BusinessAssessment.profile_id == profileId
+        if businessKey:
+            condition = (condition | (BusinessAssessment.business_key == businessKey))
+        rows = db.scalars(select(BusinessAssessment).where(BusinessAssessment.user_id == user.id, condition).order_by(BusinessAssessment.created_at.desc()).limit(20)).all()
+    elif businessKey:
+        rows = db.scalars(select(BusinessAssessment).where(BusinessAssessment.user_id == user.id, BusinessAssessment.business_key == businessKey).order_by(BusinessAssessment.created_at.desc()).limit(20)).all()
+    else:
+        rows = db.scalars(select(BusinessAssessment).where(BusinessAssessment.user_id == user.id).order_by(BusinessAssessment.created_at.desc()).limit(20)).all()
+    return [assessment_history_item(row) for row in rows]
 
 
 @app.get("/api/funder/programmes/active")

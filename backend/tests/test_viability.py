@@ -111,6 +111,32 @@ class ViabilityAssessmentTests(unittest.TestCase):
         self.assertEqual(classify_settlement({"village": "Ga-Matlala"}, "village"), ("rural", "Ga-Matlala"))
         self.assertEqual(classify_settlement({}, "road"), ("unknown", ""))
 
+    def test_supported_locality_profiles_are_repeatable_and_business_specific(self):
+        polokwane = build_business_viability({**BASE, "location": "Polokwane, Limpopo"}, {"status": "partial_location", "contextDataAvailable": False, "settlementClass": "urban_or_town", "localityLabel": "Polokwane"})
+        polokwane_repeat = build_business_viability({**BASE, "location": "Polokwane, Limpopo"}, {"status": "partial_location", "contextDataAvailable": False, "settlementClass": "urban_or_town", "localityLabel": "Polokwane"})
+        tzaneen = build_business_viability({**BASE, "location": "Tzaneen, Limpopo"}, {"status": "partial_location", "contextDataAvailable": False, "settlementClass": "urban_or_town", "localityLabel": "Tzaneen"})
+        location_score = lambda result: next(item["score"] for item in result["categoryScores"] if item["key"] == "locationMarket")
+        self.assertEqual(location_score(polokwane), location_score(polokwane_repeat))
+        self.assertNotEqual(location_score(polokwane), location_score(tzaneen))
+        self.assertNotEqual(polokwane["score"], tzaneen["score"])
+        self.assertEqual(polokwane["locationEvidence"]["localityProfileAdjustment"], 6)
+        self.assertEqual(tzaneen["locationEvidence"]["localityProfileAdjustment"], 1)
+        self.assertIn("published regional role", polokwane["locationEvidence"]["summary"])
+        self.assertEqual(polokwane["locationEvidence"]["localityProfileSource"]["name"], "Limpopo Provincial Government Annual Performance Plan 2023/24")
+
+    def test_same_locality_uses_different_sector_context(self):
+        polokwane_retail = build_business_viability({**BASE, "businessTypeCategory": "grocery"}, {"localityLabel": "Polokwane"})
+        tzaneen_agriculture = build_business_viability({**BASE, "businessTypeCategory": "agriculture"}, {"localityLabel": "Tzaneen"})
+        self.assertEqual(polokwane_retail["locationEvidence"]["localityProfileAdjustment"], 6)
+        self.assertEqual(tzaneen_agriculture["locationEvidence"]["localityProfileAdjustment"], 6)
+
+    def test_locality_from_submitted_location_applies_when_map_lookup_fails(self):
+        polokwane = build_business_viability({**BASE, "location": "Polokwane, Limpopo"}, {"status": "unavailable"})
+        tzaneen = build_business_viability({**BASE, "location": "Tzaneen, Limpopo"}, {"status": "unavailable"})
+        location_score = lambda result: next(item["score"] for item in result["categoryScores"] if item["key"] == "locationMarket")
+        self.assertEqual(location_score(polokwane), 56)
+        self.assertEqual(location_score(tzaneen), 51)
+
     def test_zero_or_negative_monthly_profit_is_reported_as_high_risk(self):
         values = {**BASE, "monthlyRevenue": 20000, "monthlyExpenses": 20000}
         result = build_business_viability(values, {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 8, "relevantAnchors": 4, "competitorCount": 2})

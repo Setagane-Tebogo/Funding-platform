@@ -181,6 +181,92 @@ def classify_settlement(address: dict[str, Any], addresstype: str = "") -> tuple
     return "unknown", ""
 
 
+# Stable, broad locality profiles from official provincial planning sources.
+# These are context adjustments, not measured demand or success probabilities.
+# Keep them small so pin-level evidence and the applicant's own figures remain
+# more influential than a town label.
+LOCALITY_PROFILES = {
+    "polokwane": {
+        "label": "Polokwane",
+        "source": "Limpopo Provincial Government Annual Performance Plan 2023/24",
+        "source_url": "https://www.limpopo.gov.za/webDocs/Plans/APP_2023_2024_.pdf",
+        "sectors": {
+            "transport": 5, "logistics": 5, "professional": 4,
+            "health": 4, "education": 4, "grocery": 6,
+            "clothing": 6, "electronics": 5, "restaurant": 4,
+            "cafe": 2, "automotive": 2, "construction": 2,
+        },
+    },
+    "tzaneen": {
+        "label": "Tzaneen",
+        "source": "Limpopo Spatial Development Framework 2025",
+        "source_url": "https://www.limpopo.gov.za/webDocs/Documents/LIMPOPO_SPATIAL_DEVELOPMENT_FRAMEWORK2025.pdf",
+        "sectors": {
+            "agriculture": 6, "farm_supply": 6, "tourism": 5,
+            "logistics": 3, "transport": 2, "restaurant": 2,
+            "grocery": 1, "automotive": 2,
+        },
+    },
+    "thohoyandou": {
+        "label": "Thohoyandou",
+        "source": "Limpopo Spatial Development Framework 2025",
+        "source_url": "https://www.limpopo.gov.za/webDocs/Documents/LIMPOPO_SPATIAL_DEVELOPMENT_FRAMEWORK2025.pdf",
+        "sectors": {"agriculture": 5, "farm_supply": 5, "professional": 4, "health": 4, "education": 4, "grocery": 3, "transport": 3, "logistics": 2},
+    },
+    "phalaborwa": {
+        "label": "Phalaborwa",
+        "source": "Limpopo Provincial Government Annual Performance Plan 2023/24",
+        "source_url": "https://www.limpopo.gov.za/webDocs/Plans/APP_2023_2024_.pdf",
+        "sectors": {"tourism": 6, "agriculture": 4, "farm_supply": 3, "transport": 3, "grocery": 2, "restaurant": 3, "automotive": 2},
+    },
+    "mokopane": {
+        "label": "Mokopane",
+        "source": "Limpopo Provincial Government Annual Performance Plan 2023/24",
+        "source_url": "https://www.limpopo.gov.za/webDocs/Plans/APP_2023_2024_.pdf",
+        "sectors": {"agriculture": 4, "farm_supply": 4, "tourism": 3, "transport": 3, "logistics": 3, "grocery": 2},
+    },
+    "musina": {
+        "label": "Musina",
+        "source": "Limpopo Provincial Government Annual Performance Plan 2023/24",
+        "source_url": "https://www.limpopo.gov.za/webDocs/Plans/APP_2023_2024_.pdf",
+        "sectors": {"logistics": 6, "transport": 5, "manufacturing": 4, "automotive": 3, "grocery": 2},
+    },
+    "makhado": {
+        "label": "Makhado",
+        "source": "Limpopo Provincial Government Annual Performance Plan 2023/24",
+        "source_url": "https://www.limpopo.gov.za/webDocs/Plans/APP_2023_2024_.pdf",
+        "sectors": {"logistics": 3, "transport": 3, "manufacturing": 3, "construction": 3, "grocery": 2},
+    },
+    "lephalale": {
+        "label": "Lephalale",
+        "source": "Limpopo Provincial Government Annual Performance Plan 2023/24",
+        "source_url": "https://www.limpopo.gov.za/webDocs/Plans/APP_2023_2024_.pdf",
+        "sectors": {"construction": 4, "manufacturing": 3, "logistics": 4, "transport": 3, "grocery": 2},
+    },
+    "giyani": {
+        "label": "Giyani",
+        "source": "Limpopo Provincial Government District and Municipality Overview",
+        "source_url": "https://www.limpopo.gov.za/?page_id=3437",
+        "sectors": {"agriculture": 4, "farm_supply": 4, "grocery": 3, "transport": 2, "professional": 2},
+    },
+}
+
+
+def locality_profile(locality_label: str, category: str) -> tuple[int, str, dict[str, str] | None]:
+    """Return a repeatable broad-sector adjustment for a supported locality."""
+    normalized = " ".join(str(locality_label or "").casefold().replace("-", " ").split())
+    tokens = set(normalized.replace(",", " ").split())
+    aliases = {"greater tzaneen": "tzaneen", "mogalakwena": "mokopane", "thulamela": "thohoyandou"}
+    profile_key = next((name for name in LOCALITY_PROFILES if name in tokens), None)
+    if profile_key is None:
+        profile_key = next((target for alias, target in aliases.items() if alias in normalized), None)
+    profile = LOCALITY_PROFILES.get(profile_key) if profile_key else None
+    if profile is None:
+        return 0, "", None
+    adjustment = int(profile["sectors"].get(category, 0))
+    return adjustment, profile["label"], {"name": profile["source"], "url": profile["source_url"]}
+
+
 def _present(values: dict[str, Any], name: str) -> bool:
     provided = values.get("providedInputs")
     if isinstance(provided, list):
@@ -222,6 +308,16 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
     risk_mitigation = str(values.get("riskMitigation") or "").strip()
     stage = str(values.get("businessStage") or "").casefold()
     industry_aligned = location.get("industryAlignedWithBusinessType") is not False
+    locality_adjustment, profiled_locality, locality_source = locality_profile(
+        str(location.get("localityLabel") or values.get("location") or ""), category
+    )
+    locality_note = (
+        f" {profiled_locality}'s published regional role adds a stable {locality_adjustment:+d}-point broad-sector context adjustment for {category.replace('_', ' ')}."
+        if profiled_locality and locality_adjustment
+        else f" {profiled_locality} is recognised, but no extra sector adjustment is assigned for {category.replace('_', ' ')}."
+        if profiled_locality
+        else ""
+    )
 
     # Location is based on pin-specific mapped context: local activity density, relevant
     # anchors, and transit access raise the score; dense same-type competition lowers it.
@@ -241,46 +337,46 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
             sparse_anchor_points = min(8, anchors * 4)
             sparse_access_points = min(4, int(location.get("nearbyTransitFeatures") or 0) * 2)
             competition_adjustment = -12 if competitors >= 8 else -6 if competitors >= 4 else 3 if competitors > 0 else 0
-            location_score = _clamp(50 + settlement_adjustment + sparse_anchor_points + sparse_access_points + competition_adjustment)
+            location_score = _clamp(50 + settlement_adjustment + locality_adjustment + sparse_anchor_points + sparse_access_points + competition_adjustment)
             location_reason = (
                 f"Only {mapped_features} nearby mapped feature(s) were returned within {radius_meters:,} m, including "
                 f"{anchors} business-relevant anchor(s), {int(location.get('nearbyTransitFeatures') or 0)} transit feature(s), "
                 f"and {competitors} matching business(es). This sparse evidence adjusts the location score cautiously; "
-                "it is not a complete picture of the area and does not verify customer demand."
+                "it is not a complete picture of the area and does not verify customer demand." + locality_note
             )
         elif map_available and competitors > 0:
             competition_adjustment = -15 if competitors >= 8 else -7 if competitors >= 4 else 3
-            location_score = _clamp(50 + settlement_adjustment + competition_adjustment)
+            location_score = _clamp(50 + settlement_adjustment + locality_adjustment + competition_adjustment)
             location_reason = (
                 f"The location lookup returned {competitors} named listing(s) matching this business type, "
                 "which provides a limited competition signal for this pin. "
                 + (f"The mapped settlement type ({settlement_class.replace('_', ' ')}) adds a small industry-fit adjustment. " if settlement_class != "unknown" else "")
-                + "Nearby customer activity and access could not be verified; these are screening signals, not proof of demand or profit."
+                + "Nearby customer activity and access could not be verified; these are screening signals, not proof of demand or profit." + locality_note
             )
         elif settlement_class != "unknown":
-            location_score = _clamp(50 + settlement_adjustment)
+            location_score = _clamp(50 + settlement_adjustment + locality_adjustment)
             location_reason = (
                 f"Nearby map features were unavailable, but reverse geocoding classifies this pin as "
                 f"{location.get('localityLabel') or settlement_class.replace('_', ' ')} ({settlement_class.replace('_', ' ')}). "
                 f"The location score uses a small settlement-type fit adjustment for {values.get('businessType') or 'this business type'}; "
-                "this does not measure local demand, customer numbers, or purchasing power."
+                "this does not measure local demand, customer numbers, or purchasing power." + locality_note
             )
         else:
-            location_score = 50
-            location_reason = "Reliable nearby map context was unavailable or too sparse, so location remains neutral; missing map data does not count this against urban or rural locations. The score cannot infer local demand without mapped evidence."
+            location_score = _clamp(50 + locality_adjustment)
+            location_reason = "Reliable nearby map context was unavailable or too sparse, so pin-level evidence remains neutral; missing map data does not count this against urban or rural locations. The score cannot infer local demand without mapped evidence." + locality_note
     else:
         transit = int(location.get("nearbyTransitFeatures") or 0)
         density_points = min(15, max(0, (mapped_features - 4) // 10 * 3))
         anchor_points = min(20, anchors * 4)
         access_points = min(10, transit * 2)
         competition_adjustment = -15 if competitors >= 8 else -7 if competitors >= 4 else 3 if competitors > 0 else 0
-        location_score = _clamp(50 + density_points + anchor_points + access_points + competition_adjustment)
+        location_score = _clamp(50 + locality_adjustment + density_points + anchor_points + access_points + competition_adjustment)
         location_reason = (
             f"Within {radius_meters:,} m of this pin, OpenStreetMap returned {mapped_features} mapped feature(s), including "
             f"{anchors} context anchor(s) relevant to {values.get('businessType') or 'this business type'} "
             f"and {transit} transit feature(s). {competitors} similar mapped business(es) "
             f"{'lower the location score because of a competition signal' if competitors >= 4 else 'provide a limited market-presence signal' if competitors else 'were returned'}; "
-            "these map indicators are incomplete proxies, not customer counts, spending data, or proof of profit."
+            "these map indicators are incomplete proxies, not customer counts, spending data, or proof of profit." + locality_note
         )
     if not industry_aligned:
         location_score = min(location_score, 30)
@@ -479,7 +575,7 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
         "categoryScores": categories,
         "financials": {"monthlyRevenue": revenue if _present(values, "monthlyRevenue") else None, "monthlyExpenses": expenses if _present(values, "monthlyExpenses") else None, "monthlyProfit": monthly_profit if financial_provided else None, "profitMarginPercent": round(profit_margin * 100, 2) if profit_margin is not None else None, "startupCosts": startup if _present(values, "startupCosts") else None, "availableCapital": available if _present(values, "availableCapital") else None, "fundingRequired": funding if _present(values, "fundingRequired") else None, "fundingGap": round(funding_gap, 2) if capital_complete else None, "breakEvenMonths": startup_payback_months},
         "sectorGuidance": sector,
-        "locationEvidence": {"status": location.get("status", "unavailable"), "score": round(location_score), "scoreWeight": CATEGORY_WEIGHTS["locationMarket"], "settlementClass": settlement_class if settlement_class != "unknown" else None, "localityLabel": location.get("localityLabel"), "coordinates": location.get("coordinates"), "source": location.get("source", "OpenStreetMap services"), "radiusMeters": location.get("radiusMeters"), "mappedFeatureCount": mapped_features if map_available else None, "similarBusinessCount": competitors if map_available else None, "relevantContextCount": anchors if map_available else None, "summary": location_reason, "coverageNote": location.get("coverageNote", "Nearby map data could not be retrieved; no live local statistics are available.")},
+        "locationEvidence": {"status": location.get("status", "unavailable"), "score": round(location_score), "scoreWeight": CATEGORY_WEIGHTS["locationMarket"], "settlementClass": settlement_class if settlement_class != "unknown" else None, "localityLabel": profiled_locality or location.get("localityLabel"), "localityProfileAdjustment": locality_adjustment, "localityProfileSource": locality_source, "coordinates": location.get("coordinates"), "source": location.get("source", "OpenStreetMap services"), "radiusMeters": location.get("radiusMeters"), "mappedFeatureCount": mapped_features if map_available else None, "similarBusinessCount": competitors if map_available else None, "relevantContextCount": anchors if map_available else None, "summary": location_reason, "coverageNote": location.get("coverageNote", "Nearby map data could not be retrieved; no live local statistics are available.")},
         "strengths": strengths,
         "risks": risks,
         "recommendations": list(dict.fromkeys(recommendations)),

@@ -1,6 +1,6 @@
 import unittest
 
-from viability import CATEGORY_WEIGHTS, build_business_viability
+from viability import CATEGORY_WEIGHTS, build_business_viability, classify_settlement
 
 
 BASE = {
@@ -79,7 +79,7 @@ class ViabilityAssessmentTests(unittest.TestCase):
         few_score = next(item["score"] for item in few_listings["categoryScores"] if item["key"] == "locationMarket")
         many_score = next(item["score"] for item in many_listings["categoryScores"] if item["key"] == "locationMarket")
         self.assertGreater(few_score, many_score)
-        self.assertIn("competition only", many_listings["locationEvidence"]["summary"])
+        self.assertIn("competition signal", many_listings["locationEvidence"]["summary"])
 
     def test_mapped_activity_density_changes_location_and_overall_scores(self):
         low_activity = build_business_viability(BASE, {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 8, "relevantAnchors": 1, "nearbyTransitFeatures": 0, "competitorCount": 0})
@@ -88,6 +88,19 @@ class ViabilityAssessmentTests(unittest.TestCase):
         high_location = next(item["score"] for item in high_activity["categoryScores"] if item["key"] == "locationMarket")
         self.assertGreater(high_location, low_location)
         self.assertGreater(high_activity["score"], low_activity["score"])
+
+    def test_settlement_type_fallback_changes_score_by_industry(self):
+        rural_site = build_business_viability(BASE, {"status": "partial_location", "contextDataAvailable": False, "settlementClass": "rural", "localityLabel": "Mokopane outskirts"})
+        town_site = build_business_viability(BASE, {"status": "partial_location", "contextDataAvailable": False, "settlementClass": "urban_or_town", "localityLabel": "Polokwane"})
+        rural_location = next(item["score"] for item in rural_site["categoryScores"] if item["key"] == "locationMarket")
+        town_location = next(item["score"] for item in town_site["categoryScores"] if item["key"] == "locationMarket")
+        self.assertNotEqual(rural_location, town_location)
+        self.assertIn("does not measure local demand", rural_site["locationEvidence"]["summary"])
+
+    def test_settlement_classifier_handles_town_and_rural_labels(self):
+        self.assertEqual(classify_settlement({"town": "Polokwane"}, "suburb"), ("urban_or_town", "Polokwane"))
+        self.assertEqual(classify_settlement({"village": "Ga-Matlala"}, "village"), ("rural", "Ga-Matlala"))
+        self.assertEqual(classify_settlement({}, "road"), ("unknown", ""))
 
     def test_zero_or_negative_monthly_profit_is_reported_as_high_risk(self):
         values = {**BASE, "monthlyRevenue": 20000, "monthlyExpenses": 20000}

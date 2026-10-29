@@ -165,6 +165,22 @@ def _clamp(value: float, low: float = 0, high: float = 100) -> float:
     return max(low, min(high, value))
 
 
+def classify_settlement(address: dict[str, Any], addresstype: str = "") -> tuple[str, str]:
+    """Classify only mapped settlement labels; this is not a population estimate."""
+    normalized_address = {str(key).casefold(): str(value) for key, value in address.items() if value}
+    place_type = str(addresstype or "").casefold()
+    urban_names = ("city", "town", "municipality", "borough", "suburb", "quarter", "neighbourhood")
+    rural_names = ("village", "hamlet", "farm", "isolated_dwelling", "locality")
+    urban_place_type = {"city", "town", "suburb", "quarter", "neighbourhood"}
+    rural_place_type = {"village", "hamlet", "farm", "isolated_dwelling", "locality"}
+
+    if any(normalized_address.get(name) for name in ("city", "town", "municipality", "borough")) or place_type in urban_place_type:
+        return "urban_or_town", next((normalized_address[name] for name in urban_names if normalized_address.get(name)), "")
+    if any(normalized_address.get(name) for name in rural_names) or place_type in rural_place_type:
+        return "rural", next((normalized_address[name] for name in rural_names if normalized_address.get(name)), "")
+    return "unknown", ""
+
+
 def _present(values: dict[str, Any], name: str) -> bool:
     provided = values.get("providedInputs")
     if isinstance(provided, list):
@@ -192,6 +208,7 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
     anchors = int(location.get("relevantAnchors") or 0)
     mapped_features = int(location.get("mappedFeatureCount") or 0)
     radius_meters = int(location.get("radiusMeters") or 5000)
+    settlement_class = str(location.get("settlementClass") or "unknown")
     map_available = location.get("status") not in {None, "unavailable"}
     map_context = bool(
         map_available
@@ -211,14 +228,31 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
     # Sparse/unavailable data stays neutral, especially for rural areas. OSM does not prove
     # customer demand, purchasing power, safety, or infrastructure reliability.
     if not map_context:
+        settlement_adjustment = 0
+        urban_service_types = {"grocery", "clothing", "restaurant", "cafe", "salon", "laundry", "tailoring", "health", "education", "electronics", "professional", "automotive", "carwash"}
+        rural_fit_types = {"agriculture", "farm_supply"}
+        if settlement_class == "urban_or_town" and category in urban_service_types:
+            settlement_adjustment = 5
+        elif settlement_class == "rural" and category in rural_fit_types:
+            settlement_adjustment = 8
+        elif settlement_class == "rural" and category in urban_service_types:
+            settlement_adjustment = -5
         if map_available and competitors > 0:
             competition_adjustment = -15 if competitors >= 8 else -7 if competitors >= 4 else 3
-            location_score = _clamp(50 + competition_adjustment)
+            location_score = _clamp(50 + settlement_adjustment + competition_adjustment)
             location_reason = (
                 f"The location lookup returned {competitors} named listing(s) matching this business type, "
-                "which provides a limited competition signal for this pin. Nearby customer activity and access "
-                "could not be verified, so the score reflects competition only; incomplete rural or urban map "
-                "coverage is not proof of low demand."
+                "which provides a limited competition signal for this pin. "
+                + (f"The mapped settlement type ({settlement_class.replace('_', ' ')}) adds a small industry-fit adjustment. " if settlement_class != "unknown" else "")
+                + "Nearby customer activity and access could not be verified; these are screening signals, not proof of demand or profit."
+            )
+        elif settlement_class != "unknown":
+            location_score = _clamp(50 + settlement_adjustment)
+            location_reason = (
+                f"Nearby map features were unavailable, but reverse geocoding classifies this pin as "
+                f"{location.get('localityLabel') or settlement_class.replace('_', ' ')} ({settlement_class.replace('_', ' ')}). "
+                f"The location score uses a small settlement-type fit adjustment for {values.get('businessType') or 'this business type'}; "
+                "this does not measure local demand, customer numbers, or purchasing power."
             )
         else:
             location_score = 50
@@ -434,7 +468,7 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
         "categoryScores": categories,
         "financials": {"monthlyRevenue": revenue if _present(values, "monthlyRevenue") else None, "monthlyExpenses": expenses if _present(values, "monthlyExpenses") else None, "monthlyProfit": monthly_profit if financial_provided else None, "profitMarginPercent": round(profit_margin * 100, 2) if profit_margin is not None else None, "startupCosts": startup if _present(values, "startupCosts") else None, "availableCapital": available if _present(values, "availableCapital") else None, "fundingRequired": funding if _present(values, "fundingRequired") else None, "fundingGap": round(funding_gap, 2) if capital_complete else None, "breakEvenMonths": startup_payback_months},
         "sectorGuidance": sector,
-        "locationEvidence": {"status": location.get("status", "unavailable"), "score": round(location_score), "scoreWeight": CATEGORY_WEIGHTS["locationMarket"], "source": location.get("source", "OpenStreetMap services"), "radiusMeters": location.get("radiusMeters"), "mappedFeatureCount": mapped_features if map_available else None, "similarBusinessCount": competitors if map_available else None, "relevantContextCount": anchors if map_available else None, "summary": location_reason, "coverageNote": location.get("coverageNote", "Nearby map data could not be retrieved; no live local statistics are available.")},
+        "locationEvidence": {"status": location.get("status", "unavailable"), "score": round(location_score), "scoreWeight": CATEGORY_WEIGHTS["locationMarket"], "settlementClass": settlement_class if settlement_class != "unknown" else None, "localityLabel": location.get("localityLabel"), "coordinates": location.get("coordinates"), "source": location.get("source", "OpenStreetMap services"), "radiusMeters": location.get("radiusMeters"), "mappedFeatureCount": mapped_features if map_available else None, "similarBusinessCount": competitors if map_available else None, "relevantContextCount": anchors if map_available else None, "summary": location_reason, "coverageNote": location.get("coverageNote", "Nearby map data could not be retrieved; no live local statistics are available.")},
         "strengths": strengths,
         "risks": risks,
         "recommendations": list(dict.fromkeys(recommendations)),

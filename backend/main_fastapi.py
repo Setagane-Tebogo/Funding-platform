@@ -28,7 +28,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, create_engine, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
-from viability import build_business_viability
+from viability import build_business_viability, classify_settlement
 
 
 class Settings(BaseSettings):
@@ -774,6 +774,7 @@ async def search_business_location(q: str = Query(min_length=2, max_length=200),
             contact = os.getenv("PUBLIC_GEOCODER_CONTACT", "")
             user_agent = "FundBridge/1.0" + (f" ({contact})" if contact else "")
             async with httpx.AsyncClient(timeout=12, headers={"User-Agent": user_agent, "Accept": "application/json"}) as client:
+                LOCATION_SEARCH_LAST_CALL = time.monotonic()
                 response = await client.get("https://nominatim.openstreetmap.org/search", params={"format": "jsonv2", "limit": 5, "countrycodes": "za", "addressdetails": 1, "q": q.strip()})
                 response.raise_for_status()
                 rows = response.json()
@@ -891,8 +892,8 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
             # Cap the complete provider attempt as well as individual HTTP phases.
             # Three slow public services plus the geocoder fallback can otherwise
             # outlive the hosting platform's request window.
-            async with asyncio.timeout(5):
-                async with httpx.AsyncClient(timeout=httpx.Timeout(4, connect=2), headers={"User-Agent": "FundBridge/1.0 (business location suitability)", "Accept": "application/json"}) as client:
+            async with asyncio.timeout(4):
+                async with httpx.AsyncClient(timeout=httpx.Timeout(3, connect=1.5), headers={"User-Agent": "FundBridge/1.0 (business location suitability)", "Accept": "application/json"}) as client:
                     response = await client.post(endpoint, data={"data": query})
                     response.raise_for_status()
                     payload = response.json()
@@ -903,7 +904,7 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
                     break
         except Exception as exc:
             failures.append(f"{endpoint}: {type(exc).__name__}")
-    if elements is None:
+    if not elements:
         logging.getLogger("fundbridge.location").warning("All nearby map providers failed: %s", "; ".join(failures))
         # Nominatim is not a complete POI database, but can still return named places
         # matching the selected activity. Report it as partial evidence only.
@@ -917,7 +918,7 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
             "travel": "travel agency", "carwash": "car wash", "farm_supply": "agricultural supply",
             "construction": "construction company",
         }
-        geocode_term = search_terms.get(category)
+        geocode_term = search_terms.get(category) or request.businessType.strip()
         if geocode_term:
             global LOCATION_SEARCH_LAST_CALL
             try:
@@ -930,7 +931,8 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
                     viewbox = f"{lon - lon_delta},{lat + lat_delta},{lon + lon_delta},{lat - lat_delta}"
                     contact = os.getenv("PUBLIC_GEOCODER_CONTACT", "")
                     agent = "FundBridge/1.0" + (f" ({contact})" if contact else "")
-                    async with httpx.AsyncClient(timeout=httpx.Timeout(6, connect=2), headers={"User-Agent": agent, "Accept": "application/json"}) as client:
+                    async with httpx.AsyncClient(timeout=httpx.Timeout(4, connect=2), headers={"User-Agent": agent, "Accept": "application/json"}) as client:
+                        LOCATION_SEARCH_LAST_CALL = time.monotonic()
                         response = await client.get("https://nominatim.openstreetmap.org/search", params={"format": "jsonv2", "limit": 30, "countrycodes": "za", "viewbox": viewbox, "bounded": 1, "q": geocode_term})
                         response.raise_for_status()
                         rows = response.json()
@@ -951,10 +953,38 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
                     if distance <= radius:
                         listed_places.append({"name": row.get("name") or row.get("display_name", geocode_term), "distanceMeters": round(distance), "latitude": place_lat, "longitude": place_lon})
                 listed_places.sort(key=lambda place: place["distanceMeters"])
+                settlement_class = "unknown"
+                settlement_type = ""
+                locality_label = ""
+                if not listed_places:
+                    # A reverse lookup gives us the mapped settlement around a rural
+                    # or urban pin even when no same-type business is indexed nearby.
+                    # This is only a place-classification signal, never a demand claim.
+                    try:
+                        async with LOCATION_SEARCH_LOCK:
+                            wait = 1.0 - (time.monotonic() - LOCATION_SEARCH_LAST_CALL)
+                            if wait > 0:
+                                await asyncio.sleep(wait)
+                            async with httpx.AsyncClient(timeout=httpx.Timeout(4, connect=2), headers={"User-Agent": agent, "Accept": "application/json"}) as client:
+                                LOCATION_SEARCH_LAST_CALL = time.monotonic()
+                                reverse_response = await client.get("https://nominatim.openstreetmap.org/reverse", params={"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 13, "addressdetails": 1})
+                                reverse_response.raise_for_status()
+                                reverse = reverse_response.json()
+                            LOCATION_SEARCH_LAST_CALL = time.monotonic()
+                        address = reverse.get("address") or {}
+                        settlement_type = str(reverse.get("addresstype") or reverse.get("type") or "").casefold()
+                        settlement_class, locality_label = classify_settlement(address, settlement_type)
+                        locality_label = locality_label or str(reverse.get("name") or "")
+                    except Exception as reverse_exc:
+                        failures.append(f"Nominatim reverse lookup: {type(reverse_exc).__name__}")
                 if listed_places:
                     status_value = "partial_geocoder"
                     verdict = f"{len(listed_places)} nearby named listing(s) match {request.businessType}"
                     message = f"The geocoder returned {len(listed_places)} named place(s) matching '{geocode_term}' in the selected radius. The closest returned listing is about {listed_places[0]['distanceMeters']} m away. This is partial search evidence, not a complete competitor count or proof of customer demand."
+                elif settlement_class != "unknown":
+                    status_value = "partial_location"
+                    verdict = f"Mapped settlement identified as {settlement_class.replace('_', ' ')}"
+                    message = f"OpenStreetMap identifies this pin as {locality_label or settlement_type or settlement_class}. Settlement type can guide a broad business-fit check, but it does not provide local customer counts, purchasing power, or proof of demand."
                 else:
                     status_value = "partial_data"
                     verdict = "No exact named listings returned; this is not a negative location verdict"
@@ -970,7 +1000,7 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
                 }
                 expected_industry_terms = fallback_industry_terms.get(category, ())
                 fallback_industry_aligned = not expected_industry_terms or "other" in request.industry.lower() or any(term in request.industry.lower() for term in expected_industry_terms)
-                fallback = {"status": status_value, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": fallback_industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "nearbyTypeListingsCount": len(listed_places), "nearbyTypeListings": listed_places[:10], "contextDataAvailable": False, "contextNote": "Exact-business geocoder fallback does not retrieve a complete count of homes, transport, amenities, or other local activity. A zero here means no indexed match was returned, not that the area has no demand.", "source": "OpenStreetMap Nominatim bounded search", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "This fallback searches named/indexed map listings only. It is incomplete and does not count every business or surrounding feature.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
+                fallback = {"status": status_value, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": fallback_industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "nearbyTypeListingsCount": len(listed_places), "nearbyTypeListings": listed_places[:10], "settlementClass": settlement_class, "settlementType": settlement_type, "localityLabel": locality_label, "contextDataAvailable": False, "contextNote": "Exact-business geocoder fallback does not retrieve a complete count of homes, transport, amenities, or other local activity. A zero here means no indexed match was returned, not that the area has no demand.", "source": "OpenStreetMap Nominatim bounded search and reverse geocoding", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "Fallback place and settlement labels come from community-mapped OpenStreetMap data. They do not provide customer counts, purchasing power, demand, safety, or a complete competitor count.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
                 LOCATION_ANALYSIS_CACHE[cache_key] = (time.monotonic(), fallback)
                 return fallback
             except Exception as exc:

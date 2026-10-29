@@ -1,15 +1,15 @@
 :root {
   font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-  color: #23332c;
+  color: #1d2b22;
   background: #f5f4ef;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --ink: #23332c;
-  --muted: #737c73;
-  --green: #1c4a3a;
-  --green-dark: #14392e;
+  --ink: #1d2b22;
+  --muted: #59665d;
+  --green: #174a35;
+  --green-dark: #103927;
   --green-soft: #e8eee8;
   --lime: #dce8a8;
   --paper: #f5f4ef;
@@ -88,14 +88,14 @@ h1,
 
 .nav-label,
 .eyebrow {
-  color: #7a817c;
+  color: #59665d;
   font-size: 10px;
   letter-spacing: .06em;
 }
 
 .sidebar .nav-label {
   margin-left: 12px;
-  color: #717a73;
+  color: #59665d;
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0;
@@ -147,7 +147,7 @@ h1,
 }
 
 .sidebar-bottom p {
-  color: #757d77;
+  color: #59665d;
 }
 
 .main-content {
@@ -171,7 +171,7 @@ h1,
 }
 
 .breadcrumb {
-  color: #92978d;
+  color: #59665d;
   font-size: 12px;
 }
 
@@ -357,7 +357,7 @@ h1,
 
 .insight-panel p:not(.eyebrow),
 .opportunity-panel > p:not(.eyebrow) {
-  color: #68756b;
+  color: #536157;
 }
 
 .primary-button,
@@ -645,6 +645,14 @@ h1,
   color: #fff;
 }
 
+.conversation-item small,
+.conversation-item span,
+.chat-title small,
+.chat-bubble small,
+.chat-subtitle {
+  color: #58645a;
+}
+
 .chat-bubble.mine small {
   color: #d8e6d9;
 }
@@ -865,11 +873,11 @@ h1,
 }
 
 .auth-security-note {
-  color: #828a80;
+  color: #59665d;
 }
 
 footer {
-  color: #8a9288;
+  color: #59665d;
 }
 
 @media (max-width: 1000px) {
@@ -1122,7 +1130,7 @@ footer {
 .dashboard-welcome-copy > p:last-child {
   max-width: 540px;
   margin: 8px 0 0;
-  color: #6b716d;
+  color: #59665d;
   font-size: 13px;
   line-height: 1.55;
 }
@@ -1190,7 +1198,7 @@ footer {
 }
 
 .dashboard-step-copy small {
-  color: #717872;
+  color: #59665d;
   font-size: 12px;
   line-height: 1.5;
 }

@@ -251,6 +251,30 @@ LOCALITY_PROFILES = {
     },
 }
 
+# Broad provincial economic roles are based on Stats SA's Provincial GDP 2024
+# release and provincial economy summaries. The configured +3 is a conservative
+# rules-based sector-context signal; it is not a measured business success rate.
+PROVINCE_PROFILES = {
+    "eastern cape": {"sectors": {"personal_services", "manufacturing", "agriculture"}},
+    "free state": {"sectors": {"finance", "agriculture", "mining"}},
+    "gauteng": {"sectors": {"finance", "manufacturing", "trade", "transport"}},
+    "kwazulu natal": {"sectors": {"personal_services", "manufacturing", "agriculture", "trade", "transport"}},
+    "limpopo": {"sectors": {"personal_services", "mining", "agriculture", "tourism"}},
+    "mpumalanga": {"sectors": {"mining", "agriculture", "manufacturing", "utilities"}},
+    "northern cape": {"sectors": {"mining", "agriculture", "tourism", "utilities"}},
+    "north west": {"sectors": {"mining", "agriculture", "tourism"}},
+    "western cape": {"sectors": {"finance", "agriculture", "tourism", "manufacturing", "trade"}},
+}
+
+PROVINCE_CATEGORY_SECTOR = {
+    "agriculture": "agriculture", "farm_supply": "agriculture",
+    "professional": "finance", "health": "personal_services", "education": "personal_services",
+    "grocery": "trade", "clothing": "trade", "restaurant": "trade", "cafe": "trade",
+    "tourism": "tourism", "travel": "tourism", "manufacturing": "manufacturing",
+    "transport": "transport", "logistics": "transport", "construction": "construction",
+    "utilities": "utilities",
+}
+
 
 def locality_profile(locality_label: str, category: str) -> tuple[int, str, dict[str, str] | None]:
     """Return a repeatable broad-sector adjustment for a supported locality."""
@@ -265,6 +289,21 @@ def locality_profile(locality_label: str, category: str) -> tuple[int, str, dict
         return 0, "", None
     adjustment = int(profile["sectors"].get(category, 0))
     return adjustment, profile["label"], {"name": profile["source"], "url": profile["source_url"]}
+
+
+def province_profile(province_label: str, category: str) -> tuple[int, str, dict[str, str] | None]:
+    """Return a stable province-wide context only for documented leading sectors."""
+    normalized = " ".join(str(province_label or "").casefold().replace("-", " ").split())
+    aliases = {"kwazulu natal": "kwazulu natal", "kzn": "kwazulu natal", "northern cape": "northern cape", "north west": "north west"}
+    province = next((name for name in PROVINCE_PROFILES if name in normalized), None)
+    if province is None:
+        province = next((target for alias, target in aliases.items() if alias == normalized), None)
+    if province is None:
+        return 0, "", None
+    sector = PROVINCE_CATEGORY_SECTOR.get(category, "")
+    adjustment = 3 if sector and sector in PROVINCE_PROFILES[province]["sectors"] else 0
+    source = {"name": "Statistics South Africa, Provincial GDP 2024", "url": "https://www.statssa.gov.za/publications/P04412/P044122024.pdf"}
+    return adjustment, province.title() if province != "kwazulu natal" else "KwaZulu-Natal", source
 
 
 def _present(values: dict[str, Any], name: str) -> bool:
@@ -308,14 +347,26 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
     risk_mitigation = str(values.get("riskMitigation") or "").strip()
     stage = str(values.get("businessStage") or "").casefold()
     industry_aligned = location.get("industryAlignedWithBusinessType") is not False
+    location_category = CATEGORY_ALIASES.get(category, category)
     locality_adjustment, profiled_locality, locality_source = locality_profile(
-        str(location.get("localityLabel") or values.get("location") or ""), category
+        str(location.get("localityLabel") or values.get("location") or ""), location_category
     )
+    province_adjustment, profiled_province, province_source = (0, "", None)
+    if not profiled_locality:
+        province_adjustment, profiled_province, province_source = province_profile(
+            str(location.get("provinceLabel") or values.get("location") or ""), location_category
+        )
+    regional_adjustment = locality_adjustment or province_adjustment
+    regional_source = locality_source or province_source
     locality_note = (
         f" {profiled_locality}'s published regional role adds a stable {locality_adjustment:+d}-point broad-sector context adjustment for {category.replace('_', ' ')}."
         if profiled_locality and locality_adjustment
         else f" {profiled_locality} is recognised, but no extra sector adjustment is assigned for {category.replace('_', ' ')}."
         if profiled_locality
+        else f" {profiled_province}'s published provincial industry profile adds a stable +{province_adjustment}-point broad-sector context adjustment for {category.replace('_', ' ')}."
+        if profiled_province and province_adjustment
+        else f" {profiled_province} is recognised; its published leading sectors do not add a specific adjustment for {category.replace('_', ' ')}."
+        if profiled_province
         else ""
     )
 
@@ -337,7 +388,7 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
             sparse_anchor_points = min(8, anchors * 4)
             sparse_access_points = min(4, int(location.get("nearbyTransitFeatures") or 0) * 2)
             competition_adjustment = -12 if competitors >= 8 else -6 if competitors >= 4 else 3 if competitors > 0 else 0
-            location_score = _clamp(50 + settlement_adjustment + locality_adjustment + sparse_anchor_points + sparse_access_points + competition_adjustment)
+            location_score = _clamp(50 + settlement_adjustment + regional_adjustment + sparse_anchor_points + sparse_access_points + competition_adjustment)
             location_reason = (
                 f"Only {mapped_features} nearby mapped feature(s) were returned within {radius_meters:,} m, including "
                 f"{anchors} business-relevant anchor(s), {int(location.get('nearbyTransitFeatures') or 0)} transit feature(s), "
@@ -346,7 +397,7 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
             )
         elif map_available and competitors > 0:
             competition_adjustment = -15 if competitors >= 8 else -7 if competitors >= 4 else 3
-            location_score = _clamp(50 + settlement_adjustment + locality_adjustment + competition_adjustment)
+            location_score = _clamp(50 + settlement_adjustment + regional_adjustment + competition_adjustment)
             location_reason = (
                 f"The location lookup returned {competitors} named listing(s) matching this business type, "
                 "which provides a limited competition signal for this pin. "
@@ -354,7 +405,7 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
                 + "Nearby customer activity and access could not be verified; these are screening signals, not proof of demand or profit." + locality_note
             )
         elif settlement_class != "unknown":
-            location_score = _clamp(50 + settlement_adjustment + locality_adjustment)
+            location_score = _clamp(50 + settlement_adjustment + regional_adjustment)
             location_reason = (
                 f"Nearby map features were unavailable, but reverse geocoding classifies this pin as "
                 f"{location.get('localityLabel') or settlement_class.replace('_', ' ')} ({settlement_class.replace('_', ' ')}). "
@@ -362,7 +413,7 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
                 "this does not measure local demand, customer numbers, or purchasing power." + locality_note
             )
         else:
-            location_score = _clamp(50 + locality_adjustment)
+            location_score = _clamp(50 + regional_adjustment)
             location_reason = "Reliable nearby map context was unavailable or too sparse, so pin-level evidence remains neutral; missing map data does not count this against urban or rural locations. The score cannot infer local demand without mapped evidence." + locality_note
     else:
         transit = int(location.get("nearbyTransitFeatures") or 0)
@@ -370,7 +421,7 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
         anchor_points = min(20, anchors * 4)
         access_points = min(10, transit * 2)
         competition_adjustment = -15 if competitors >= 8 else -7 if competitors >= 4 else 3 if competitors > 0 else 0
-        location_score = _clamp(50 + locality_adjustment + density_points + anchor_points + access_points + competition_adjustment)
+        location_score = _clamp(50 + regional_adjustment + density_points + anchor_points + access_points + competition_adjustment)
         location_reason = (
             f"Within {radius_meters:,} m of this pin, OpenStreetMap returned {mapped_features} mapped feature(s), including "
             f"{anchors} context anchor(s) relevant to {values.get('businessType') or 'this business type'} "
@@ -558,6 +609,8 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
     sources = [{"name": "OpenStreetMap contributors", "status": "connected" if map_context else "partial" if map_available else "unavailable", "license": "ODbL 1.0", "url": "https://www.openstreetmap.org/copyright", "limitation": "Community-mapped features; incomplete coverage; not a population, purchasing-power, safety, or customer-demand dataset."},
                {"name": "Statistics South Africa Census 2022", "status": "not_connected", "url": "https://www.statssa.gov.za/?page_id=1854", "limitation": "Municipal/census information is not currently joined to this pin; no local population or income estimate is claimed."},
                {"name": "National Treasury Municipal Money API", "status": "not_connected", "url": "https://municipaldata.treasury.gov.za/docs", "limitation": "Municipal finance context is not business-level household purchasing power and is not currently joined to this assessment."}]
+    if regional_source:
+        sources.append({"name": regional_source["name"], "status": "context_reference", "url": regional_source["url"], "limitation": "Used only for a small, fixed industry-alignment adjustment. Provincial economic activity does not establish local demand, customer numbers, purchasing power, or this business's profitability."})
 
     return {
         "model": "FundBridge transparent baseline v1",
@@ -575,7 +628,7 @@ def build_business_viability(values: dict[str, Any], location: dict[str, Any], e
         "categoryScores": categories,
         "financials": {"monthlyRevenue": revenue if _present(values, "monthlyRevenue") else None, "monthlyExpenses": expenses if _present(values, "monthlyExpenses") else None, "monthlyProfit": monthly_profit if financial_provided else None, "profitMarginPercent": round(profit_margin * 100, 2) if profit_margin is not None else None, "startupCosts": startup if _present(values, "startupCosts") else None, "availableCapital": available if _present(values, "availableCapital") else None, "fundingRequired": funding if _present(values, "fundingRequired") else None, "fundingGap": round(funding_gap, 2) if capital_complete else None, "breakEvenMonths": startup_payback_months},
         "sectorGuidance": sector,
-        "locationEvidence": {"status": location.get("status", "unavailable"), "score": round(location_score), "scoreWeight": CATEGORY_WEIGHTS["locationMarket"], "settlementClass": settlement_class if settlement_class != "unknown" else None, "localityLabel": profiled_locality or location.get("localityLabel"), "localityProfileAdjustment": locality_adjustment, "localityProfileSource": locality_source, "coordinates": location.get("coordinates"), "source": location.get("source", "OpenStreetMap services"), "radiusMeters": location.get("radiusMeters"), "mappedFeatureCount": mapped_features if map_available else None, "similarBusinessCount": competitors if map_available else None, "relevantContextCount": anchors if map_available else None, "summary": location_reason, "coverageNote": location.get("coverageNote", "Nearby map data could not be retrieved; no live local statistics are available.")},
+        "locationEvidence": {"status": location.get("status", "unavailable"), "score": round(location_score), "scoreWeight": CATEGORY_WEIGHTS["locationMarket"], "settlementClass": settlement_class if settlement_class != "unknown" else None, "localityLabel": profiled_locality or location.get("localityLabel"), "provinceLabel": profiled_province or location.get("provinceLabel"), "localityProfileAdjustment": locality_adjustment, "provinceProfileAdjustment": province_adjustment, "localityProfileSource": regional_source, "coordinates": location.get("coordinates"), "source": location.get("source", "OpenStreetMap services"), "radiusMeters": location.get("radiusMeters"), "mappedFeatureCount": mapped_features if map_available else None, "similarBusinessCount": competitors if map_available else None, "relevantContextCount": anchors if map_available else None, "summary": location_reason, "coverageNote": location.get("coverageNote", "Nearby map data could not be retrieved; no live local statistics are available.")},
         "strengths": strengths,
         "risks": risks,
         "recommendations": list(dict.fromkeys(recommendations)),

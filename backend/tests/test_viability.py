@@ -137,6 +137,27 @@ class ViabilityAssessmentTests(unittest.TestCase):
         self.assertEqual(location_score(polokwane), 56)
         self.assertEqual(location_score(tzaneen), 51)
 
+    def test_all_nine_provinces_have_repeatable_industry_profiles(self):
+        cases = {
+            "Eastern Cape": "health",
+            "Free State": "professional",
+            "Gauteng": "manufacturing",
+            "KwaZulu-Natal": "restaurant",
+            "Limpopo": "health",
+            "Mpumalanga": "agriculture",
+            "Northern Cape": "tourism",
+            "North West": "agriculture",
+            "Western Cape": "tourism",
+        }
+        for province, category in cases.items():
+            with self.subTest(province=province):
+                values = {**BASE, "businessTypeCategory": category, "location": f"Town, {province}, South Africa"}
+                first = build_business_viability(values, {"status": "unavailable"})
+                second = build_business_viability(values, {"status": "unavailable"})
+                self.assertEqual(first["score"], second["score"])
+                self.assertEqual(first["locationEvidence"]["provinceLabel"], province)
+                self.assertEqual(first["locationEvidence"]["provinceProfileAdjustment"], 3)
+
     def test_zero_or_negative_monthly_profit_is_reported_as_high_risk(self):
         values = {**BASE, "monthlyRevenue": 20000, "monthlyExpenses": 20000}
         result = build_business_viability(values, {"status": "ok", "contextDataAvailable": True, "mappedFeatureCount": 8, "relevantAnchors": 4, "competitorCount": 2})

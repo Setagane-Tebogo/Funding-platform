@@ -787,6 +787,33 @@ async def search_business_location(q: str = Query(min_length=2, max_length=200),
 
 
 LOCATION_ANALYSIS_CACHE: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
+LOCATION_REVERSE_CACHE: dict[tuple[float, float], tuple[float, dict[str, Any]]] = {}
+
+
+async def reverse_geocode_location(lat: float, lon: float) -> dict[str, Any]:
+    """Resolve administrative area labels for a pin; cache them independently of sector searches."""
+    global LOCATION_SEARCH_LAST_CALL
+    key = (round(lat, 4), round(lon, 4))
+    cached = LOCATION_REVERSE_CACHE.get(key)
+    if cached and time.monotonic() - cached[0] < 86400:
+        return cached[1]
+    async with LOCATION_SEARCH_LOCK:
+        cached = LOCATION_REVERSE_CACHE.get(key)
+        if cached and time.monotonic() - cached[0] < 86400:
+            return cached[1]
+        wait = 1.0 - (time.monotonic() - LOCATION_SEARCH_LAST_CALL)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        contact = os.getenv("PUBLIC_GEOCODER_CONTACT", "")
+        agent = "FundBridge/1.0" + (f" ({contact})" if contact else "")
+        async with httpx.AsyncClient(timeout=httpx.Timeout(4, connect=2), headers={"User-Agent": agent, "Accept": "application/json"}) as client:
+            LOCATION_SEARCH_LAST_CALL = time.monotonic()
+            response = await client.get("https://nominatim.openstreetmap.org/reverse", params={"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 13, "addressdetails": 1})
+            response.raise_for_status()
+            payload = response.json()
+        LOCATION_SEARCH_LAST_CALL = time.monotonic()
+        LOCATION_REVERSE_CACHE[key] = (time.monotonic(), payload)
+        return payload
 
 
 @app.post("/api/entrepreneur/location-analysis")
@@ -956,27 +983,18 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
                 settlement_class = "unknown"
                 settlement_type = ""
                 locality_label = ""
-                if not listed_places:
-                    # A reverse lookup gives us the mapped settlement around a rural
-                    # or urban pin even when no same-type business is indexed nearby.
-                    # This is only a place-classification signal, never a demand claim.
-                    try:
-                        async with LOCATION_SEARCH_LOCK:
-                            wait = 1.0 - (time.monotonic() - LOCATION_SEARCH_LAST_CALL)
-                            if wait > 0:
-                                await asyncio.sleep(wait)
-                            async with httpx.AsyncClient(timeout=httpx.Timeout(4, connect=2), headers={"User-Agent": agent, "Accept": "application/json"}) as client:
-                                LOCATION_SEARCH_LAST_CALL = time.monotonic()
-                                reverse_response = await client.get("https://nominatim.openstreetmap.org/reverse", params={"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 13, "addressdetails": 1})
-                                reverse_response.raise_for_status()
-                                reverse = reverse_response.json()
-                            LOCATION_SEARCH_LAST_CALL = time.monotonic()
-                        address = reverse.get("address") or {}
-                        settlement_type = str(reverse.get("addresstype") or reverse.get("type") or "").casefold()
-                        settlement_class, locality_label = classify_settlement(address, settlement_type)
-                        locality_label = locality_label or str(reverse.get("name") or "")
-                    except Exception as reverse_exc:
-                        failures.append(f"Nominatim reverse lookup: {type(reverse_exc).__name__}")
+                province_label = ""
+                # Resolve the selected pin for every fallback result, including when
+                # named businesses were found, so province-level profiles work too.
+                try:
+                    reverse = await reverse_geocode_location(lat, lon)
+                    address = reverse.get("address") or {}
+                    settlement_type = str(reverse.get("addresstype") or reverse.get("type") or "").casefold()
+                    settlement_class, locality_label = classify_settlement(address, settlement_type)
+                    locality_label = locality_label or str(reverse.get("name") or "")
+                    province_label = str(address.get("state") or address.get("province") or "")
+                except Exception as reverse_exc:
+                    failures.append(f"Nominatim reverse lookup: {type(reverse_exc).__name__}")
                 if listed_places:
                     status_value = "partial_geocoder"
                     verdict = f"{len(listed_places)} nearby named listing(s) match {request.businessType}"
@@ -1000,7 +1018,7 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
                 }
                 expected_industry_terms = fallback_industry_terms.get(category, ())
                 fallback_industry_aligned = not expected_industry_terms or "other" in request.industry.lower() or any(term in request.industry.lower() for term in expected_industry_terms)
-                fallback = {"status": status_value, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": fallback_industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "nearbyTypeListingsCount": len(listed_places), "nearbyTypeListings": listed_places[:10], "settlementClass": settlement_class, "settlementType": settlement_type, "localityLabel": locality_label, "contextDataAvailable": False, "contextNote": "Exact-business geocoder fallback does not retrieve a complete count of homes, transport, amenities, or other local activity. A zero here means no indexed match was returned, not that the area has no demand.", "source": "OpenStreetMap Nominatim bounded search and reverse geocoding", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "Fallback place and settlement labels come from community-mapped OpenStreetMap data. They do not provide customer counts, purchasing power, demand, safety, or a complete competitor count.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
+                fallback = {"status": status_value, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": fallback_industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "nearbyTypeListingsCount": len(listed_places), "nearbyTypeListings": listed_places[:10], "settlementClass": settlement_class, "settlementType": settlement_type, "localityLabel": locality_label, "provinceLabel": province_label, "contextDataAvailable": False, "contextNote": "Exact-business geocoder fallback does not retrieve a complete count of homes, transport, amenities, or other local activity. A zero here means no indexed match was returned, not that the area has no demand.", "source": "OpenStreetMap Nominatim bounded search and reverse geocoding", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "Fallback place and settlement labels come from community-mapped OpenStreetMap data. They do not provide customer counts, purchasing power, demand, safety, or a complete competitor count.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
                 LOCATION_ANALYSIS_CACHE[cache_key] = (time.monotonic(), fallback)
                 return fallback
             except Exception as exc:
@@ -1117,7 +1135,19 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
         message = f"No nearby places tagged like {request.businessType} were found. This could mean an opportunity or incomplete map coverage; validate demand with prospective customers before investing."
     if industry_specific and not industry_aligned:
         message = f"The selected industry sector ({request.industry}) may not match the business type ({request.businessType}). Check the form selections. " + message
-    result = {"status": status, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "mappedFeatureCount": total_features, "competitorCount": competitor_count, "nearbyShops": sum(1 for tags in tags_list if tags.get("shop")), "nearbyAmenities": sum(1 for tags in tags_list if tags.get("amenity")), "nearbyOffices": employment_count, "nearbyTransitFeatures": transit_count, "residentialAreaFeatures": residential_count, "schoolFeatures": schools_count, "tourismFeatures": tourism_count, "relevantAnchors": relevant_anchors, "industryMatchSupported": industry_specific, "resultLimit": 250, "contextDataAvailable": True, "contextNote": "Nearby mapped homes/places, shops, services, and transport are broad context indicators only. They are not customer counts, spending data, foot traffic, or proof of demand.", "source": f"OpenStreetMap via {used_endpoint}", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "OpenStreetMap is community-mapped and may omit businesses or features. Up to 250 mapped features were sampled in the selected radius; this is not a foot-traffic count, verified census, safety rating, or proof of customer demand.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this location-fit analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
+    settlement_class = "unknown"
+    locality_label = ""
+    province_label = ""
+    try:
+        reverse = await reverse_geocode_location(lat, lon)
+        address = reverse.get("address") or {}
+        settlement_type = str(reverse.get("addresstype") or reverse.get("type") or "").casefold()
+        settlement_class, locality_label = classify_settlement(address, settlement_type)
+        locality_label = locality_label or str(reverse.get("name") or "")
+        province_label = str(address.get("state") or address.get("province") or "")
+    except Exception as reverse_exc:
+        logging.getLogger("fundbridge.location").info("Reverse geocoding unavailable for selected pin: %s", type(reverse_exc).__name__)
+    result = {"status": status, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "mappedFeatureCount": total_features, "competitorCount": competitor_count, "nearbyShops": sum(1 for tags in tags_list if tags.get("shop")), "nearbyAmenities": sum(1 for tags in tags_list if tags.get("amenity")), "nearbyOffices": employment_count, "nearbyTransitFeatures": transit_count, "residentialAreaFeatures": residential_count, "schoolFeatures": schools_count, "tourismFeatures": tourism_count, "relevantAnchors": relevant_anchors, "industryMatchSupported": industry_specific, "resultLimit": 250, "contextDataAvailable": True, "contextNote": "Nearby mapped homes/places, shops, services, and transport are broad context indicators only. They are not customer counts, spending data, foot traffic, or proof of demand.", "localityLabel": locality_label, "settlementClass": settlement_class, "provinceLabel": province_label, "source": f"OpenStreetMap via {used_endpoint}; settlement and province via Nominatim", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "OpenStreetMap is community-mapped and may omit businesses or features. Up to 250 mapped features were sampled in the selected radius; this is not a foot-traffic count, verified census, safety rating, or proof of customer demand.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this location-fit analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
     LOCATION_ANALYSIS_CACHE[cache_key] = (time.monotonic(), result)
     return result
 

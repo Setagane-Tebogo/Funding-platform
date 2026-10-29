@@ -644,11 +644,27 @@ async def analyse(request: AnalysisRequest, user: User = Depends(require_role("E
         f"The figures you entered show a monthly {'surplus' if monthly_profit > 0 else 'deficit' if monthly_profit < 0 else 'break-even'} of R{abs(monthly_profit):,.2f} (revenue minus expenses). "
         "This arithmetic does not verify the figures or account for taxes, seasonality, financing costs, or unlisted expenses."
     )
+    # A scenario range is derived only from the user's stated monthly revenue,
+    # expenses and growth assumption. It is not a location-based forecast.
+    # Location context is added by the client after the separate map request.
+    months = (1, 6, 12)
+    growth = float(request.monthlyGrowthPercent) / 100
+    scenarios = []
+    for month in months:
+        projected_revenue = revenue * ((1 + growth) ** month) if revenue > 0 else None
+        projected_surplus = round(projected_revenue - expenses, 2) if projected_revenue is not None else None
+        scenarios.append({"month": month, "revenue": round(projected_revenue, 2) if projected_revenue is not None else None, "surplus": projected_surplus})
     result = {
         "outlook": outlook,
         "summary": summary,
         "estimatedBreakEvenMonths": break_even,
         "estimatedMonthlyProfit": round(monthly_profit, 2),
+        "potentialOutlook": {
+            "basis": "user_inputs_scenario",
+            "scenarios": scenarios,
+            "assumptions": ["Entered monthly revenue is the starting point.", "Entered monthly growth is assumed to continue each month.", "Monthly expenses are held constant.", "Taxes, seasonality, financing costs, new costs, and changes in demand are excluded."],
+            "note": "Illustrative arithmetic from the submitted assumptions, not a location-derived prediction or guaranteed profit. Validate sales and costs with local customers and records."
+        },
         "monthlyExpenses": round(expenses, 2),
         "riskFlags": risks,
         "financialRatios": {"liquidityMonths": round(liquidity, 2), "liabilitiesToAssets": round(leverage, 3)},
@@ -864,8 +880,8 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
                     message = f"The geocoder returned {len(listed_places)} named place(s) matching '{geocode_term}' in the selected radius. The closest returned listing is about {listed_places[0]['distanceMeters']} m away. This is partial search evidence, not a complete competitor count or proof of customer demand."
                 else:
                     status_value = "partial_data"
-                    verdict = "No matching named listings found; location fit is unknown"
-                    message = f"The geocoder returned no named '{geocode_term}' listings in this radius. It may omit businesses, so this does not mean none exist or that the location is unsuitable. Check the area in person."
+                    verdict = "No exact named listings returned; this is not a negative location verdict"
+                    message = f"The map search returned no named '{geocode_term}' listings within {radius} m. That may reflect incomplete map coverage, not a lack of businesses or customers. Review the broader nearby activity and validate demand locally before investing."
                 fallback_industry_terms = {
                     "grocery": ("retail",), "clothing": ("retail",), "electronics": ("retail", "technology"),
                     "restaurant": ("food", "hospitality"), "cafe": ("food", "hospitality"),
@@ -876,7 +892,7 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
                 }
                 expected_industry_terms = fallback_industry_terms.get(category, ())
                 fallback_industry_aligned = not expected_industry_terms or "other" in request.industry.lower() or any(term in request.industry.lower() for term in expected_industry_terms)
-                fallback = {"status": status_value, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": fallback_industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "nearbyTypeListingsCount": len(listed_places), "nearbyTypeListings": listed_places[:10], "source": "OpenStreetMap Nominatim bounded search", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "This fallback searches named/indexed map listings only. It is incomplete and does not count every business or surrounding feature.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
+                fallback = {"status": status_value, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": fallback_industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "nearbyTypeListingsCount": len(listed_places), "nearbyTypeListings": listed_places[:10], "contextDataAvailable": False, "contextNote": "Exact-business geocoder fallback does not retrieve a complete count of homes, transport, amenities, or other local activity. A zero here means no indexed match was returned, not that the area has no demand.", "source": "OpenStreetMap Nominatim bounded search", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "This fallback searches named/indexed map listings only. It is incomplete and does not count every business or surrounding feature.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
                 LOCATION_ANALYSIS_CACHE[cache_key] = (time.monotonic(), fallback)
                 return fallback
             except Exception as exc:
@@ -982,7 +998,7 @@ async def analyse_location(request: LocationAnalysisRequest, user: User = Depend
         message = f"No nearby places tagged like {request.businessType} were found. This could mean an opportunity or incomplete map coverage; validate demand with prospective customers before investing."
     if industry_specific and not industry_aligned:
         message = f"The selected industry sector ({request.industry}) may not match the business type ({request.businessType}). Check the form selections. " + message
-    result = {"status": status, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "mappedFeatureCount": total_features, "competitorCount": competitor_count, "nearbyShops": sum(1 for tags in tags_list if tags.get("shop")), "nearbyAmenities": sum(1 for tags in tags_list if tags.get("amenity")), "nearbyOffices": employment_count, "nearbyTransitFeatures": transit_count, "residentialAreaFeatures": residential_count, "schoolFeatures": schools_count, "tourismFeatures": tourism_count, "relevantAnchors": relevant_anchors, "industryMatchSupported": industry_specific, "resultLimit": 120, "source": f"OpenStreetMap via {used_endpoint}", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "OpenStreetMap is community-mapped and may omit businesses or features. Up to 120 mapped features were sampled in the selected radius; this is not a foot-traffic count, verified census, safety rating, or proof of customer demand.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this location-fit analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
+    result = {"status": status, "verdict": verdict, "message": message, "industry": request.industry, "industryAlignedWithBusinessType": industry_aligned, "businessType": request.businessType, "businessTypeCategory": category, "radiusMeters": radius, "mappedFeatureCount": total_features, "competitorCount": competitor_count, "nearbyShops": sum(1 for tags in tags_list if tags.get("shop")), "nearbyAmenities": sum(1 for tags in tags_list if tags.get("amenity")), "nearbyOffices": employment_count, "nearbyTransitFeatures": transit_count, "residentialAreaFeatures": residential_count, "schoolFeatures": schools_count, "tourismFeatures": tourism_count, "relevantAnchors": relevant_anchors, "industryMatchSupported": industry_specific, "resultLimit": 120, "contextDataAvailable": True, "contextNote": "Nearby mapped homes/places, shops, services, and transport are broad context indicators only. They are not customer counts, spending data, foot traffic, or proof of demand.", "source": f"OpenStreetMap via {used_endpoint}", "checkedAt": datetime.now(timezone.utc).isoformat(), "coverageNote": "OpenStreetMap is community-mapped and may omit businesses or features. Up to 120 mapped features were sampled in the selected radius; this is not a foot-traffic count, verified census, safety rating, or proof of customer demand.", "safety": {"status": "not_assessed", "message": "Safety is not assessed by this location-fit analysis."}, "coordinates": {"latitude": lat, "longitude": lon}}
     LOCATION_ANALYSIS_CACHE[cache_key] = (time.monotonic(), result)
     return result
 
